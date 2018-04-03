@@ -1,0 +1,7 @@
+Makefile
+ga/Makefile
+config.status
+*.prl
+parallel.h
+transpose.h
+config.log
