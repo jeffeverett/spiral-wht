@@ -309,5 +309,7 @@ AC_PATH_PROG(PERL, perl, none)
 AC_SUBST(PERL)
 AC_PROG_INSTALL
 
-AC_OUTPUT(Makefile ga/Makefile wht_dp.prl retime.prl simplop.prl transpose.h parallel.h, chmod 755 *.prl)
+AC_CONFIG_FILES(Makefile ga/Makefile wht_dp.prl retime.prl simplop.prl transpose.h parallel.h)
+AC_CONFIG_COMMANDS([change_perms], [chmod 755 *.prl])
+AC_OUTPUT
 
