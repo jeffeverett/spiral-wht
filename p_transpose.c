@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <math.h>
 
+#ifdef _OPENMP
+  #include <omp.h>
+#endif
+
 #include "transpose.h"
 
 void p_transpose(wht_value *xx, int n, int n1, int pll)

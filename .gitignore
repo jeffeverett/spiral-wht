@@ -5,3 +5,14 @@ config.status
 parallel.h
 transpose.h
 config.log
+*.o
+s_*.c
+il*_s_*.c
+autom4te.cache
+*.a
+wht_ga
+wht_measure
+wht_test
+wht_verify
+whtgen
+ga/ga

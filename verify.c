@@ -35,6 +35,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+#ifdef _OPENMP
+  #include <omp.h>
+#endif
+
 #include "spiral_wht.h"
 #include "parallel.h"
 

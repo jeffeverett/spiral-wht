@@ -29,6 +29,10 @@
 #include <pcl.h>
 #endif
 
+#ifdef _OPENMP
+  #include <omp.h>
+#endif
+
 #include "spiral_wht.h"
 
 

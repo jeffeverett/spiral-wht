@@ -22,6 +22,12 @@
 */
 
 #include <stdio.h>
+#include <stdlib.h>
+
+#ifdef _OPENMP
+  #include <omp.h>
+#endif
+
 #include "spiral_wht.h"
 #include "parallel.h"
 
@@ -50,7 +56,7 @@ int main(void)
 
 #ifdef PARA_ON
   omp_set_num_threads(THREADNUM);
-#pragma omp parallel
+  #pragma omp parallel
   {
     int id = omp_get_thread_num();
     if (id == 0)

@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <math.h>
 
+#ifdef _OPENMP
+  #include <omp.h>
+#endif
+
 #include "transpose.h"
 
 void p_transpose_stride(wht_value *xx, int n, int n1, long S, int pll)

@@ -43,8 +43,8 @@ AC_SUBST(MAXSIZE)
 # since it might affect runtime; if this switch is turned on,
 AC_ARG_ENABLE(DDL,
               --enable-DDL=BLSIZE   enable dynamic data layout (DDL) approach with Block SIZE (BLSIZE data points),
-	      [DDL=$enableval DDL_ON="yes"],
-	      [DDL=32 DDL_ON="no"])
+        [DDL=$enableval DDL_ON="yes"],
+        [DDL=32 DDL_ON="no"])
 
 BLSIZE=32
 
@@ -80,8 +80,8 @@ AC_SUBST(CHECK_DDL)
 # Enable Loop Interleaving approach
 AC_ARG_ENABLE(IL,
               [--enable-IL=LEVEL   Enable loop interleaving method. LEVEL=1 will interleave twice. LEVEL=2 will interleave 2 and 4 times. LEVEL=3 will interleave 2, 4 or 8 times, etc.. Default LEVEL is 2.], 
-	      [IL=$enableval IL_ON="yes"],
-	      IL_ON="no")
+        [IL=$enableval IL_ON="yes"],
+        IL_ON="no")
 
 if test "$IL" = "yes"; then
   IL=2
@@ -138,8 +138,8 @@ AC_SUBST(CHECK_DDL_IL)
 # Enable Parallel Split (PARA) Approach
 # since it might affect runtime; if this switch is turned on,
 AC_ARG_ENABLE(PARA, --enable-PARA=PARA   enable parallel split approach with PARA number of threads,
-	      [PARA=$enableval PARA_ON="yes"], 
-	      [PARA=1 PARA_ON="no"])
+        [PARA=$enableval PARA_ON="yes"], 
+        [PARA=1 PARA_ON="no"])
 
 if test "$PARA" = "yes"; then PARA=2; fi
 
@@ -255,33 +255,33 @@ fi
 TABLE="besttrees.default"
 
 if test "$target_cpu" = "sparc"; then
-	TABLE="besttrees.sparc";
+  TABLE="besttrees.sparc";
 fi
 
 if test "$target_cpu" = "i686"; then
-	TABLE="besttrees.p2";
+  TABLE="besttrees.p2";
 fi
 
 if test "$target_cpu" = ""; then
-	TABLE="besttrees.p2";
+  TABLE="besttrees.p2";
 fi
 
 AC_SUBST(TABLE)
 
 if test "$prefix" = "NONE"; then
-	FULL_LOC=/usr/local/var/wht_trees
-	MEASURE_LOC=/usr/local/bin
+  FULL_LOC=/usr/local/var/wht_trees
+  MEASURE_LOC=/usr/local/bin
 else
-	if test "$localstatedir" = '${prefix}/var'; then
-		FULL_LOC=$prefix/var/wht_trees
-	else
-		FULL_LOC=$localstatedir/wht_trees
-	fi
-	if test "$bindir" = '${exec_prefix}/bin'; then
-		MEASURE_LOC=$prefix/bin
-	else
-		MEASURE_LOC=$bindir
-	fi
+  if test "$localstatedir" = '${prefix}/var'; then
+    FULL_LOC=$prefix/var/wht_trees
+  else
+    FULL_LOC=$localstatedir/wht_trees
+  fi
+  if test "$bindir" = '${exec_prefix}/bin'; then
+    MEASURE_LOC=$prefix/bin
+  else
+    MEASURE_LOC=$bindir
+  fi
 fi
 
 AC_SUBST(FULL_LOC)
