@@ -1,0 +1,4 @@
+#define BlockSize @BLSIZE@
+#define NoUnroll 4
+
+typedef double wht_value;

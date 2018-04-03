@@ -1,0 +1,63 @@
+#!@PERL@
+
+$MEASURE_BIN="./wht_measure";
+$max = 20;
+$TREEFILE="@FULL_LOC@";
+
+# Parse args
+foreach $x (@ARGV) {
+    if( $x =~ /^-b/ ) {
+	$x =~ s/^-b//;
+	$MEASURE_BIN=$x;
+    } elsif ( $x =~ /^-m/ ) {
+	$x =~ s/^-m//;
+	$max = $x;
+    } elsif ( $x =~ /^-f/ ) {
+	$x =~ s/^-f//;
+	$TREEFILE = $x;
+    }
+    else {
+	print "Recomputes the times for the trees in the besttrees file.\n";
+	print "Usage:\n";
+	print "    retime.prl [-b<timing program>] [-f<tree file>]\n";
+        print "Default timing program is ./wht_measure, tree file is\n";
+        print "${TREEFILE} \n";
+	die "\n";
+    }
+}
+
+my $n;
+my $line;
+my @TreeTABLE, @TimeTABLE;
+my $N, $TREE, $TIME;
+
+open BEST, "< $TREEFILE";
+while($line=readline(*BEST)) {
+    if (($N, $TREE, $TIME) = ($line =~ /(\d+)\s+!\s+(\S+[\s+\S+]*)\s+!(.*)/)) {
+	if ($#TreeTABLE < $N) {$#TreeTABLE = $N; $#TimeTABLE = $N;}
+	$TreeTABLE[$N] = $TREE;
+	$TimeTABLE[$N] = $TIME;
+    }
+}
+
+close BEST;
+$n = $#TreeTABLE;
+if ($n < $max) {$max = $n;}
+
+for($N = 1; $N <= $max; $N++) {
+    $TIME=`$MEASURE_BIN -w "$TreeTABLE[$N]"`;
+    $TIME=~s/\n$//;
+    $TIME=~s/\s+//;
+    $TimeTABLE[$N] = $TIME;
+    print "$N : $TreeTABLE[$N] ! $TIME\n";
+}
+
+for ($N = $max + 1; $N <= $n; $N++) {
+    $TimeTABLE[$N] = 10e10;
+}
+  
+open BEST, "> $TREEFILE";
+for($N = 1; $N <= $n; $N++) {
+    print BEST "$N ! $TreeTABLE[$N] ! $TimeTABLE[$N]\n";
+}
+close BEST;

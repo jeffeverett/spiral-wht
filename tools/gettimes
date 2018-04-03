@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# usage: gettimes <wht-tree files>
+#
+# extracts the runtimes from <wht-tree files> and prints
+# them to stdout.
+
+# argument given?
+if [ $# -eq 0 ]; then
+  echo "error: usage makeweb <tree-file>"
+  exit
+fi
+
+# tree file
+file=$1
+
+# tree file there?
+if [ ! -f $file ]; then
+  echo "error: cannot read $file"
+  exit
+fi
+
+awk -F ! '//{print $3;}' $file

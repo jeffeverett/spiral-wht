@@ -1,0 +1,64 @@
+Genetic algorithm for finding optimal wht
+=========================================
+
+Author
+------
+Bryan Singer, bsinger@cs.cmu.edu
+
+To compile:
+   make clean
+   make depend
+   make
+
+Example run:
+   ga 20 -p 150 -g 150 -b 20 -c 40 -m 20 -s 73898
+
+Usage statement:
+   Usage: whtga transform_size
+	  [-p population_size] [-g generations]
+	  [-b best_kept] [-c crossed] [-m mutated[g#t#j#s#u#d#f#m#]]
+	  [-i injected_rand_trees]
+	  [-tree_gen uniform|series|joining|rand] [-leaf min,max]
+	  [-draw weight|tournament=size] [-fitness reciprocal|measured]
+	  [-e 'measure_executable measure_options']
+	  [-s random_seed]
+	  [-z testing_mode_only]
+
+Notes on usage:
+   - Run just "whtga" to get usage statement
+   - Semi-reasonable defaults are provided for all options
+   - Note the old "[-e epochs]" option has become "[-g generations]", and
+     a new "-e" option has been added (see below).
+   - When mutating, the kind of mutation is chosen randomly with weight
+     propotional to that specified.
+     The mutations are:
+        Grow, Truncate
+	Join, Split
+	Up, Down
+	Flip
+	Move
+     So, "-m 10g1t1j0s0u2d2f0m0" would mutate 10 individuals per generation,
+        favoring Up and Down 2 to 1 over Grow and Truncate, and would not
+	Join, Split, Flip, or Move ever.
+   - "-i 10" says to inject 10 completely random trees each generation
+   - "-l 2,6" says to only generate trees with leaves between 2-6 inclusive.
+     Note that the "uniform" tree generation scheme does not support a min
+     leaf other than 1 (and no warnings are printed).
+   - Fitness function can either be the reciprocal of the measured item,
+     or simply the measured item.  Note that the GA always tries to
+     maximize the fitness (thus the reciprocal minimizes the measured item).
+   - "-e '../../code/wht/pclprof -e PCL_STALL'" will run pclprof to measure
+     stalls
+
+
+The default settings are:
+whtga 100 -p 100 -g 100 -b 10 -c 30 -m 20g1t1j1s1u1d1f1m0 -i 10
+   -tree_gen joining -leaf 2,6 -draw weight -fitness reciprocal
+   -e './measure' -s 8349
+
+Look at options.h for global options that can't be set at the command line
+
+
+Other utilities:
+   plot_best_ave.sh -- gnuplot's the best and average times for a GA run
+   best_ave.m       -- Matlab code for the same

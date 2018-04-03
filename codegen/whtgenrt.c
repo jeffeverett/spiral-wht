@@ -1,0 +1,302 @@
+/*
+ * Copyright (c) 2000 Carnegie Mellon University
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
+ */
+
+/* Generating unrolled code for WHT building blocks
+   ================================================
+
+   This program creates C code for an unrolled 
+     WHT_N with stride S
+   on a vector x. S is a 2-power.
+
+   The unrolled code is recursive!
+
+   The loop interleaved unrolled code is generated !
+
+   No temporary is used twice!
+
+   Modified by Neungsoo Park
+*/
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+/* macros for convenience */
+#define push(x)           fprintf(stdout, x)
+#define push1(x, y)       fprintf(stdout, x, y)
+#define push2(x, y, z)    fprintf(stdout, x, y, z)
+#define push3(x, y, z, a) fprintf(stdout, x, y, z, a)
+
+#define push6(x, y, z, a, b, c, d) fprintf(stdout, x, y, z, a, b, c, d)
+
+#define PRINT_USAGE_AND_EXIT \
+  fprintf(stderr, \
+    "error, usage: whtgen -n <num> -l <loop-interleave>\n"); \
+  exit(-1);
+
+
+#define LOOP_INTERLEAVE for (il=1; il < Interleave; il++)
+
+
+/* Interleaveing Option */
+int Interleave, il;
+
+
+
+/* log_2( <n> )
+   -----------
+     returns log2(<n>) for the positive 2-power <n> as an int.
+*/
+int log_2(long n)
+{
+  int k;
+
+  k = 0;
+  while (n > 1) {
+    n /= 2;
+    k++;
+  }
+  return k;
+}
+
+
+/* pushwht( <init>, <size>, <stride> )
+   -----------------------------------
+     produces the Interleaveed code of a WHT(2^<size>) with <stride>
+     starting at index <init>.
+     The produced code is recursive.
+*/
+void pushwht(long init, long size, long stride, long var) {
+  long i;
+
+  if (size == 2) {
+
+    /* write from vector to temporaries */
+    push3(
+      "  t%ld = x[%ld * S] + x[%ld * S];\n", 
+      var,
+      init,
+      init + stride
+    );
+    LOOP_INTERLEAVE push6(
+      "  tu%d_%ld = x%d[%ld * S] + x%d[%ld * S];\n", 
+      il, var,
+      il, init,
+      il, init + stride
+    );
+    push3(
+      "  t%ld = x[%ld * S] - x[%ld * S];\n", 
+      var + 1,
+      init,
+      init + stride
+    );
+    LOOP_INTERLEAVE push6(
+      "  tu%d_%ld = x%d[%ld * S] - x%d[%ld * S];\n", 
+      il, var + 1,
+      il, init,
+      il, init + stride
+    );
+  }
+  else {
+
+    /* write from temporaries to temporaries */
+    pushwht(init, size/2, stride, var);
+    pushwht(init+size/2, size/2, stride, var + (log_2(size) - 1) * size/2);
+    var += (log_2(size) - 1) * size;
+    for (i =  var; i < var+size/2; i++) {
+      push3(
+        "  t%ld = t%ld + t%ld;\n",
+        i,
+        i - (log_2(size) - 1) * size/2 - size/2,
+        i - size/2
+      );
+      LOOP_INTERLEAVE push6(
+        "  tu%d_%ld = tu%d_%ld + tu%d_%ld;\n",
+        il, i,
+        il, i - (log_2(size) - 1) * size/2 - size/2,
+        il, i - size/2
+      );
+      push3(
+        "  t%ld = t%ld - t%ld;\n",
+        i + size/2,
+        i - (log_2(size) - 1) * size/2 - size/2,
+        i - size/2
+      );
+      LOOP_INTERLEAVE push6(
+        "  tu%d_%ld = tu%d_%ld - tu%d_%ld;\n",
+        il, i + size/2,
+        il, i - (log_2(size) - 1) * size/2 - size/2,
+        il, i - size/2
+      );
+    }
+  }
+}
+
+
+int main(int argc, char *argv[])
+{
+  long n, i, nrvar;
+  int k;
+  char c;
+
+  /* decode argument */
+  if (argc == 1) {
+    printf("usage: whtgen -n <num> -l <Loop-Interleave>\n");
+    exit(0);
+  }
+  n = 0;
+  Interleave = 1;
+  while (++n < argc) {
+    if (*argv[n]++ == '-') {
+      c = *argv[n];
+      switch (c) {
+      case 'n':
+        if (argc == n+1) {
+          PRINT_USAGE_AND_EXIT;
+        }
+        sscanf(argv[++n], "%d", &k);
+        if (k <= 0) {
+          PRINT_USAGE_AND_EXIT;
+        }
+        break;
+      case 'l':
+        if (argc == n+1) {
+          PRINT_USAGE_AND_EXIT;
+        }
+        sscanf(argv[++n], "%d", &Interleave);
+        if (k <= 0) {
+          PRINT_USAGE_AND_EXIT;
+        }
+        break;
+      default:
+        fprintf(stderr, "error, illegal option %c\n", c);
+        exit(-1);
+      }
+    }
+    else {
+      printf("error, options must be preceded by '-'\n");
+      exit(-1);
+    }  
+  }
+
+  n = (long) pow(2, k);
+
+  if (Interleave < 2) {
+  /* print function header */
+  push("/* This function has been automatically generated by whtgen. */\n\n");
+  push1("/*\n  apply_small%d( <wht>, <S>, <x> )", k);
+  push("\n  ------------------------------");
+  if (k >= 10) {
+    push("-");
+  }
+  push("\n  computes");
+  push1("\n    WHT_(2^%d) with stride <S>", k);
+  push("\n  on the vector <x>\n*/\n\n");
+
+  /* includes */
+  push("#include \"spiral_wht.h\"\n\n");
+
+  /* function */
+
+  push1("void apply_small%d(Wht *W, long S, wht_value *x)\n{\n", k);
+  } else {
+
+  /* print function header */
+  push("/* This function has been automatically generated by whtgen. */\n\n");
+  push2("/*\n  apply_il%d_small%d( <wht>, <S>, <D>, <x> )", Interleave, k);
+  push("\n  ------------------------------");
+  if (k >= 10) {
+    push("-");
+  }
+  push("\n  computes");
+  push1("\n    Interleaved WHT_(2^%d) with stride <S> and distance <D>", k);
+  push("\n  on the vector <x>\n*/\n\n");
+
+  /* includes */
+  push("#include \"spiral_wht.h\"\n\n");
+
+  /* function */
+
+  push2("void apply_il%d_small%d(Wht *W, long S, long D, wht_value *x)\n{\n", Interleave, k);
+  }
+  /* variable declaration: we need (k-1) * 2^k temporaries and 2 for k = 1 */
+  if (k == 1)
+    nrvar = 2;
+  else
+    nrvar = (k-1) * n;
+  for (i = 0; i < nrvar; i++)
+    { 
+      push1("  wht_value t%ld;\n", i);
+      for (il=1; il < Interleave; il++) push2("  wht_value tu%d_%ld;\n", il, i);
+    }
+  push("\n");
+  LOOP_INTERLEAVE push1("  wht_value *x%d;\n",il);
+  push("\n"); 
+  push("\n"); 
+  LOOP_INTERLEAVE push2("  x%d = x + %d * D;\n",il,il);
+  push("\n"); 
+
+  /* body */
+  if (n == 2) {
+    pushwht(0, n, 1, 0);
+    push("  x[0 * S] = t0;\n");
+    LOOP_INTERLEAVE push2("  x%d[0 * S] = tu%d_0;\n",il,il);
+    push("  x[1 * S] = t1;\n");
+    LOOP_INTERLEAVE push2("  x%d[1 * S] = tu%d_1;\n",il,il);
+  }
+  else {
+    pushwht(0, n/2, 1, 0);
+    pushwht(n/2, n/2, 1, nrvar/2);
+
+    /* write from temporaries to vector */
+    for (i = 0; i < n/2; i++) {
+      push3(
+        "  x[%ld * S] = t%ld + t%ld;\n",
+        i,
+        nrvar/2 - n/2 + i,
+        nrvar - n/2 + i
+     );
+      LOOP_INTERLEAVE push6(
+        "  x%d[%ld * S] = tu%d_%ld + tu%d_%ld;\n",
+        il, i,
+        il, nrvar/2 - n/2 + i,
+        il, nrvar - n/2 + i
+     );
+      push3(
+        "  x[%ld * S] = t%ld - t%ld;\n",
+        i + n/2,
+        nrvar/2 - n/2 + i,
+        nrvar - n/2 + i
+     );
+      LOOP_INTERLEAVE push6(
+        "  x%d[%ld * S] = tu%d_%ld - tu%d_%ld;\n",
+        il, i + n/2,
+        il, nrvar/2 - n/2 + i,
+        il, nrvar - n/2 + i
+     );
+    }
+  }
+
+  /* final brace */
+  push("}\n"); 
+
+  return 0;
+}

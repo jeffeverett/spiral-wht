@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+# Creating a website from the trees file
+# --------------------------------------
+#
+# usage: makeweb <wht-tree file>
+#
+# creates a website from <wht-tree file> and prints it to stdout.
+# Some additional information on the machine has to be inserted by hand.
+#
+
+# argument given?
+if [ $# -eq 0 ]; then
+  echo "error: usage makeweb <tree-file>"
+  exit
+fi
+
+# tree file
+file=$1
+
+# tree file there?
+if [ ! -f $file ]; then
+  echo "error: cannot read $file"
+  exit
+fi
+
+# print header
+echo '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN">'
+echo '<html lang="en-US">'
+echo '<head>'
+echo '<title>Fast WHT Trees</title>'
+echo '<link rel=stylesheet type="text/css" href="../style.css">'
+echo '</head>'
+echo '<body>'
+echo '<h1>Fast WHT Trees</h1>'
+
+# machine information
+echo "<h4>Machine Information</h4>"
+echo "<font class=tag>Machine: </font> CPU, speed, RAMsize, other not fixed parameters <br>"
+echo "<font class=tag>Operating System: </font> name and version number<br>"
+echo "<font class=tag>Compiler: </font> enter here the output of cc -V or gcc -v <br>" 
+echo "<font class=tag>Compiler Options: </font>look for CCFLAGS in the Makefile<br>" 
+echo "<br>"
+
+# print table
+echo "<h4>Best Binary Trees found with Dynamic Programming</h4>"
+echo "<table border>"
+echo "<tr><th>n<th>runtime<th>wht tree"
+awk -F! '{print "<tr><td>" $1"<td>"$3"<td>"$2;}' $file | sed 's/small//g'
+echo "</table>"
+
+# Link to wht page
+echo '<h4><a href="../wht.html">Explanation and Page of WHT Package</a></h4>'
+
+# print end
+echo '</body>'
+echo '</html>'

@@ -1,0 +1,131 @@
+WHT Package Installation
+========================
+
+
+On UNIX systems do:
+-------------------
+
+  ./configure
+    [--prefix=<installation-directory>]   # default is /usr/local
+    [--enable-RAM=<size-in-MB>]           # size of RAM in MB, default is 16
+    [--enable-DDL=BLSIZE]		  # turns on Dynamic Data Layout (DDL) approach
+                                            do not use with PCL_PROFILE, default block 
+                                            size is 32.
+    [--enable-IL=LEVEL]		          # turns on Loop Interleaving (IL) approach
+    					    LEVEL = 1 will interleave loops 2 times
+    					    LEVEL = 2 will interleave loops 2 and/or 4 times
+    					    LEVEL = 3 will interleave loops 2, 4 and/or 8 times
+					    by default, LEVEL = 2
+    [--enable-PCL]                        # turns on pcl monitoring, only for experiments
+    [--enable-PCL_PROFILE]                # turns on pcl profiling of wht trees, only for
+                                            experiments
+    [--enable-PARA=<thread number>]       # turns on parallel computation where OpenMP is 
+                                            available. Do not use with PCL and PCL_PROFILE
+
+  make
+  make install
+
+(Note: the pcl options need pcl 1.2 or 1.3 installed: http://www.fz-juelich.de/zam/PCL/)
+You can do without "make install", but loading and saving trees
+will not work. After "make install", some wht methods (trees) will be
+timed. It takes about 2 minutes. 
+Then check whether everything works
+
+  make check
+
+Now you can already use the package (see README) and the runtimes
+should be decent. However, this is an ADAPTABLE package.
+Spend about 20 minutes and call
+
+  wht_dp.prl 
+
+which finds efficient algorithms for your platform. If you have a 
+Shared Memory Multiprocessor (SMP) system, have OpenMP installed and 
+parallelism enabled in configure, the script builds adapted sequential 
+WHT algorithms as well as adapted parallel WHT algorithms (see README).
+
+You can even achieve better adaptation using a genetic algorithm. In 
+this case you can improve only one size at a time and it will most likely 
+take a night. E.g., if you want to improve size 2^17, call
+
+  wht_ga 17 -p 150 -g 150 -b 20 -c 40 -m 20 -s 73898
+
+See further instructions in the file README.
+
+
+Recommended Installation (High Performance)
+------------------------------------------
+We recommend you  
+1. determine the amount n of RAM (in MB) you have (e.g. 256).
+2. configure by
+  ./configure --enable-RAM=n --enable-DDL --enable-IL
+   or, if OpenMP is available,
+  ./configure --enable-RAM=n --enable-DDL --enable-IL 
+     --enable-PARA=CPU number of the system
+3. then do
+  make install
+4. then run
+  wht_dp.prl
+
+during the night. You should get excellent performance. See the file
+<installation-directory>/var/wht_trees to see the runtimes of wht's found.
+The parallel runtimes and algorithms are in <installation-directory>/var/
+wht_trees*, * is the thread number you set during configure.
+
+Skipping enable-DDL and/or --enable-DDL decreases the time wht_dp.prl takes
+to run. On a modern workstation, skipping both yields a runtime of about
+one hour.
+
+
+Note
+----
+DDL/IL/PARA currently does not work with PCL_PROFILE or wht_ga.
+
+Uninstall
+---------
+To uninstall do
+
+  make uninstall
+
+which removes the files
+
+  BIN_DIR/wht_measure
+  BIN_DIR/wht_dp.prl
+  BIN_DIR/wht_ga
+  BIN_DIR/wht_pclprof  # if you have used the pcl option
+  LIB_DIR/libwht.a
+  INCLUDE_DIR/spiral_wht.h
+  VAR_DIR/wht_trees
+
+if you have used the parallel option,
+  VAR_DIR/wht_trees*   # * is the thread number
+
+
+ 
+
+On Windows systems:
+-------------------
+
+Compiling the package under Windows is a bit tricky.  First, you have to
+compile a code generator (found in the codegen directory), and use that
+program to generate the codelets used by WHT.  These codelets, along with
+spiral_wht.h, spiral_wht.c, and wht_trees.c, should be compiled into a
+single library.  The other programs, like measure, you compile as normal
+and link with this library.
+
+
+Contact information
+-------------------
+This package has been created in the SPIRAL project,
+  http://www.ece.cmu.edu/~spiral
+where adaptable software for arbitrary signal transforms
+is developed.
+
+For questions and problems, please contact
+  pueschel@ece.cmu.edu
+
+
+
+
+
+

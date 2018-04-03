@@ -1,0 +1,1671 @@
+/*
+ * Copyright (c) 2000 Carnegie Mellon University
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
+ */
+
+/* Fast Walsh-Hadamard Transform (.c-file)
+  ========================================
+*/
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+#ifdef PCL_PROFILE
+#include <pcl.h>
+#endif
+
+#include "spiral_wht.h"
+
+
+/* Allocation
+   ==========
+*/
+
+/* avoiding allocations < 32 Byte */
+static void *Malloc(size_t length) {
+  void *p;
+
+  /* avoid mallocs of size below 32 bytes */
+  if (length < 32)
+    length = 32;
+
+  p = malloc(length);
+  if (p == NULL)
+    wht_error("out of memory in malloc()");
+  return p;
+}
+
+static void Free(void *p) {
+  free(p);
+}
+
+
+/* Error Messages
+   ==============
+
+   The global function or macro wht_error(msg) is called with
+   the entire error message printed into a C-string which is
+   either a constant or has been allocated with Malloc().
+*/
+
+#define strlen_int 20
+
+static void Error(char *msg) {
+  wht_error(msg);
+}
+
+static void Error_char(char *fmt, char c) {
+  char *msg;
+
+  msg = (char *) Malloc(strlen(fmt) + strlen_int);
+  sprintf(msg, fmt, c);
+  wht_error(msg);
+  Free(msg);
+}
+
+static void Error_int(char *fmt, int x1) {
+  char *msg;
+
+  msg = (char *) Malloc(strlen(fmt) + strlen_int);
+  sprintf(msg, fmt, x1);
+  wht_error(msg);  
+  Free(msg);
+}
+
+static void Error_int2(char *fmt, int x1, int x2) {
+  char *msg;
+
+  msg = (char *) Malloc(strlen(fmt) + 2*strlen_int);
+  sprintf(msg, fmt, x1, x2);
+  wht_error(msg);  
+  Free(msg);
+}
+
+static void Error_int3(char *fmt, int x1, int x2, int x3) {
+  char *msg;
+
+  msg = (char *) Malloc(strlen(fmt) + 3*strlen_int);
+  sprintf(msg, fmt, x1, x2, x3);
+  wht_error(msg);
+  Free(msg);
+}
+
+
+/* Auxiliary Functions 
+   ===================
+*/
+
+/* is2power( <n> )
+   ---------------
+     checks whether the integer <n> is a 2-power >= 1.
+*/
+int is2power(long n)
+{
+  if (n < 1)
+    return 0;
+
+  while (n % 2 == 0)
+    n /= 2;
+
+  if (n == 1)
+    return 1;
+  else
+    return 0;
+}
+
+/* The WHT's 
+   =========
+*/
+
+/* Null WHT
+   --------
+   A fake implementation. Simply returns x.
+*/
+static void apply_null(Wht *W, long S, wht_value *x) {
+  return;
+}
+
+static void delete_null(Wht *W) {
+  Free(W);
+}
+
+Wht *wht_new_null(int n) {
+  Wht *W;
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_null;
+  W->N         = (long) pow((double) 2, (double) n);
+  W->n         = n;
+  W->apply     = apply_null;
+  W->deleteObj = delete_null;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif
+
+  return W;
+}
+
+
+/* Direct WHT
+   ----------
+   WHT is computed using ordinary matrix multiplication.
+   The matrix, of course, is never built.
+*/
+
+/* wht_entry(k, row, col)
+   ----------------------
+     returns the entry of the WHT(2^k) at (row, col),
+     1 <= row, col <= 2^k.
+*/
+int wht_entry(int k, long row, long col)
+{
+  long h = (long) pow((double) 2, (double) k-1);
+  int  b = 0;
+
+  /* case k = 1 */
+  if (k == 1) {
+    return (row == 2 && col == 2) ? -1 : 1;
+  }
+
+  /* recurse */
+  if (row > h) {
+    row = row - h;
+    b   = 1;
+  }
+  if (col > h) {
+    col = col - h;
+    if (b)
+      return -wht_entry(k-1, row, col);
+  }
+  return wht_entry(k-1, row, col);
+}
+
+static void apply_direct(Wht *W, long S, wht_value *x) {
+  long N = W->N;
+  int n = W->n;
+  wht_value *y = (wht_value *) Malloc(N * sizeof(wht_value));
+  long i, j;
+
+/* matrix multiplication, result is in y */
+  /*#pragma omp parallel for private (i, j)*/
+  for (i = 0; i < N; i++) {
+    y[i] = 0;
+    for (j = 0; j < N; j++)
+      y[i] += wht_entry(n, i+1, j+1) * x[j*S];
+  }
+
+  /* copy y to x with stride S */
+  for (i = 0; i < N; i++) 
+    x[i*S] = y[i];
+}
+
+static void delete_direct(Wht *W) {
+  Free(W);
+}
+
+Wht *wht_new_direct(int n) {
+  Wht *W;
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_direct;
+  W->N         = (long) pow((double) 2,(double)  n);
+  W->n         = n;
+  W->apply     = apply_direct;
+  W->deleteObj = delete_direct;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif
+
+  return W;
+}
+
+
+/* Small WHT
+   ---------
+   Unrolled building blocks from the library libwht.a,
+   which are generated by whtgen.
+*/
+
+static void delete_small(Wht *W) {
+  Free(W);
+}
+
+Wht *wht_new_small(int n) {
+  Wht *W;
+
+  if (n > MAX_UNROLLED) {
+    Error_int2("%d > %d too large", n, MAX_UNROLLED);
+  }
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_small;
+  W->N         = (long) pow((double) 2, (double) n);
+  W->n         = n;
+  W->deleteObj = delete_small;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif
+
+  switch (n) {
+    case 1: W->apply = apply_small1; break;
+    case 2: W->apply = apply_small2; break;
+    case 3: W->apply = apply_small3; break;
+    case 4: W->apply = apply_small4; break;
+    case 5: W->apply = apply_small5; break;
+    case 6: W->apply = apply_small6; break;
+    case 7: W->apply = apply_small7; break;
+    case 8: W->apply = apply_small8; break;
+    default:
+      Error_int("unrecognized n = %d in wht_new_small()", n);
+      delete_null(W);
+      return NULL;
+  }
+
+  return W;  
+}
+
+/* Small WHT unrolled.
+   ---------
+*/
+
+#ifdef IL_ON
+static void delete_small_il(Wht *W) {
+  Free(W);
+}
+
+Wht *wht_new_small_il(int n, int nILNumber) {
+  Wht *W;
+
+  if (n > MAX_UNROLLED) {
+    Error_int2("%d > %d too large", n, MAX_UNROLLED);
+  }
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_small_il;
+  W->N         = (long) pow(2, n);
+  W->n         = n;
+  W->nILNumber = nILNumber;
+  W->deleteObj = delete_small_il;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif
+
+
+  switch (nILNumber) {
+
+#ifdef IL_LEVEL1
+	case 2:
+  		switch (n) {
+		    case 1: W->apply = apply_il2_small1; break;
+		    case 2: W->apply = apply_il2_small2; break;
+		    case 3: W->apply = apply_il2_small3; break;
+		    case 4: W->apply = apply_il2_small4; break;
+		    case 5: W->apply = apply_il2_small5; break;
+		    case 6: W->apply = apply_il2_small6; break;
+		    case 7: W->apply = apply_il2_small7; break;
+		    default:
+		      Error_int("unrecognized n = %d in wht_new_small()", n);
+		      delete_null(W);
+		      return NULL;
+		  }
+		break;
+#endif
+
+#ifdef IL_LEVEL2
+	case 4:
+  		switch (n) {
+		    case 1: W->apply = apply_il4_small1; break;
+		    case 2: W->apply = apply_il4_small2; break;
+		    case 3: W->apply = apply_il4_small3; break;
+		    case 4: W->apply = apply_il4_small4; break;
+		    case 5: W->apply = apply_il4_small5; break;
+		    case 6: W->apply = apply_il4_small6; break;
+		    default:
+		      Error_int("unrecognized n = %d in wht_new_small()", n);
+		      delete_null(W);
+		      return NULL;
+		}
+		break;
+#endif
+
+#ifdef IL_LEVEL3
+	case 8:
+  		switch (n) {
+		    case 1: W->apply = apply_il8_small1; break;
+		    case 2: W->apply = apply_il8_small2; break;
+		    case 3: W->apply = apply_il8_small3; break;
+		    case 4: W->apply = apply_il8_small4; break;
+		    case 5: W->apply = apply_il8_small5; break;
+		    default:
+		      Error_int("unrecognized n = %d in wht_new_small()", n);
+		      delete_null(W);
+		      return NULL;
+		}
+		break;
+#endif
+
+#ifdef IL_LEVEL4
+	case 16:
+  		switch (n) {
+		    case 1: W->apply = apply_il16_small1; break;
+		    case 2: W->apply = apply_il16_small2; break;
+		    case 3: W->apply = apply_il16_small3; break;
+		    case 4: W->apply = apply_il16_small4; break;
+		    default:
+		      Error_int("unrecognized n = %d in wht_new_small()", n);
+		      delete_null(W);
+		      return NULL;
+		}
+		break;
+#endif
+	
+#ifdef IL_LEVEL5
+	case 32:
+  		switch (n) {
+		    case 1: W->apply = apply_il32_small1; break;
+		    case 2: W->apply = apply_il32_small2; break;
+		    case 3: W->apply = apply_il32_small3; break;
+		    default:
+		      Error_int("unrecognized n = %d in wht_new_small()", n);
+		      delete_null(W);
+		      return NULL;
+		}
+		break;
+#endif
+	
+
+  }
+
+  return W;  
+}
+#endif
+
+/* Split WHT
+   ---------
+   A WHT_N can be split into k WHT's of smaller size
+   (according to N = N_1 * N_2 * ... * N_k):
+
+                              WHT_N_1 tensor 1_(N/N_1) *
+     1_N_1             tensor WHT_N_2 tensor 1_(N/N_1N_2) *
+       ...
+       ...
+     1_(N_1...N_(k-1)) tensor WHT_N_k 
+
+   The WHT_N is performed by stepping through this product
+   from right to left.
+*/
+
+static void apply_split(Wht *W, long S, wht_value *x) {
+  int nn;
+  long N, R, S1, Ni, i, j, k;
+#ifdef IL_ON
+  int nIL;
+#endif
+
+#ifdef PCL_PROFILE
+  PCL_CNT_TYPE result;
+  PCL_FP_CNT_TYPE fp_result;
+
+/*
+  if( PCLquery( &event, 1, PCL_MODE_USER ) != PCL_SUCCESS ) {
+     printf( "blah\n" );
+     exit(5);
+  }
+*/
+#endif
+
+  nn = W->priv.split.nn;
+  if (nn > SPLIT_MAX_FACTORS) {
+    Error_int2("%d > %d, too many factors", nn, SPLIT_MAX_FACTORS);
+  }
+
+  N  = W->N;
+  R  = N;
+  S1 = 1;
+
+  /* step through the smaller whts */
+  for (i = nn-1; i >= 0; i--) {
+    Ni = W->priv.split.ns[i];
+    R /= Ni;
+#ifdef PCL_PROFILE
+    PCLread(&result, &fp_result, 1);
+    W->priv.split.Ws[i]->pcl -= result;
+#endif
+
+#ifdef IL_ON
+    if((W->priv.split.Ws[i])->type != wht_small_il) {
+    	for (j = 0; j < R; j++)
+	      for (k = 0; k < S1; k++)
+       		 wht_apply(W->priv.split.Ws[i], S1*S, x+k*S+j*Ni*S1*S);
+    } else {
+        nIL = (W->priv.split.Ws[i])->nILNumber;
+    	for (j = 0; j < R; j++)
+	      for (k = 0; k < S1; k+=nIL)
+       		 wht_apply_4_para(W->priv.split.Ws[i], S1*S, S, x+k*S+j*Ni*S1*S);
+    }
+#else
+    for (j = 0; j < R; j++)
+      for (k = 0; k < S1; k++)
+        wht_apply(W->priv.split.Ws[i], S1*S, x+k*S+j*Ni*S1*S);
+#endif
+
+#ifdef PCL_PROFILE
+    PCLread(&result, &fp_result, 1);
+    W->priv.split.Ws[i]->pcl += result;
+#endif
+    S1 *= Ni;
+  }
+}
+
+static void delete_split(Wht *W) {
+  int i;
+
+  for (i = 0; i < W->priv.split.nn; i++) {
+    W->priv.split.Ws[i]->deleteObj(W->priv.split.Ws[i]);
+  }
+  Free(W);
+}
+
+Wht *wht_new_split(int nn, Wht *Ws[]) {
+  Wht *W;
+  long i;
+  long N = 1;
+  int n = 0;
+
+  /* compute size of wht */
+  for (i = 0; i < nn; i++) {
+    N *= Ws[i]->N;
+    n += Ws[i]->n;
+  }
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_split;
+  W->N         = N;
+  W->n         = n;
+
+#ifdef IL_ON
+  W->nILNumber = 1;
+#endif
+
+  W->apply     = apply_split;
+  W->deleteObj = delete_split;
+  W->priv.split.nn = nn;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif 
+
+  /* store smaller whts */
+  for (i = 0; i < nn; i++) {
+    W->priv.split.Ws[i] = Ws[i];
+    W->priv.split.ns[i] = Ws[i]->N;
+  }
+
+  return W;
+}
+
+#ifdef DDL_ON
+
+#define reorganization(x,n,n1,s) \
+if ((s) == 1) {         \
+  transpose(x,n,n1);    \
+} else {                \
+  transpose_stride(x,n,n1,s); \
+} 
+
+/* Split WHT using DDL
+   ---------
+   A WHT_N can be split into two WHT's of smaller size
+   (according to N = N_1 * N_2):
+
+                              WHT_N_1 tensor 1_(N/N_1) *
+     1_N_1             tensor WHT_N_2 
+
+   The WHT_N is performed by stepping through this product
+   from right to left.
+*/
+
+static void apply_splitddl(Wht *W, long S, wht_value *x) {
+  int nn;
+  long N, R, S1, Ni, i, j;
+  int left=0, right=1;
+
+#ifdef PCL_PROFILE
+  PCL_CNT_TYPE result;
+  PCL_FP_CNT_TYPE fp_result;
+
+/*
+  if( PCLquery( &event, 1, PCL_MODE_USER ) != PCL_SUCCESS ) {
+     printf( "blah\n" );
+     exit(5);
+  }
+*/
+#endif
+
+  nn = W->priv.split.nn;
+  if (nn > SPLITddl_MAX_FACTORS) {
+    Error_int2("%d > %d, too many factors for splitddl", nn, SPLITddl_MAX_FACTORS);
+  }
+
+  N  = W->N;
+  R  = N;
+  S1 = 1;
+
+  {
+    wht_value *xpt;
+
+    if (W->priv.split.ns[1] < W->priv.split.ns[0]) {
+      /* DDL requires the right node Ws[1] is larger than the left 
+         node Ws[0] in a binary split. That is why we have a swap here. 
+         However, the swap may cause some problem for parallel computing. 
+         So instead of swap, we can reverse the execution order.
+         -Kang Chen
+       
+      Wht *temp;
+
+      temp = W->priv.split.Ws[1];  temporary for Ws[1] 
+      j = W->priv.split.ns[1];     temporary for ns[1] 
+      W->priv.split.Ws[1] = W->priv.split.Ws[0];
+      W->priv.split.ns[1] = W->priv.split.ns[0];
+      W->priv.split.Ws[0] = temp;
+      W->priv.split.ns[0] = j;
+      R = Ni;
+      Ni = W->priv.split.ns[1];
+      */
+      left = 1;
+      right = 0;
+    }    
+
+    /* i = 1; not used */
+    Ni = W->priv.split.ns[right];
+    R = N/Ni;
+    
+
+#ifdef PCL_PROFILE
+    PCLread(&result, &fp_result, 1);
+    W->priv.split.Ws[right]->pcl -= result;
+#endif
+    {
+      int NiS = Ni*S;
+      xpt = x;
+      for (j = 0; j < R; j++,xpt+=NiS)
+	wht_apply(W->priv.split.Ws[right],S, xpt);
+      reorganization(x,N,R,S);
+
+      R = Ni;
+      Ni = W->priv.split.ns[left];
+      NiS = Ni*S;
+      xpt = x;
+      for (j = 0; j < R; j++,xpt+=NiS)
+	wht_apply(W->priv.split.Ws[left], S, xpt);
+      reorganization(x,N,Ni,S);
+    }
+#ifdef PCL_PROFILE
+    PCLread(&result, &fp_result, 1);
+    W->priv.split.Ws[right]->pcl += result;
+#endif
+  }
+
+}
+
+static void delete_splitddl(Wht *W) {
+  int i;
+
+  for (i = 0; i < W->priv.split.nn; i++) {
+    W->priv.split.Ws[i]->deleteObj(W->priv.split.Ws[i]);
+  }
+  Free(W);
+}
+
+Wht *wht_new_splitddl(int nn, Wht *Ws[]) {
+  Wht *W;
+  long i;
+  long N = 1;
+  int n = 0;
+
+  /* compute size of wht */
+  for (i = 0; i < nn; i++) {
+    N *= Ws[i]->N;
+    n += Ws[i]->n;
+  }
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_splitddl;
+  W->N         = N;
+  W->n         = n;
+#ifdef IL_ON
+  W->nILNumber = 1;
+#endif
+  W->apply     = apply_splitddl;
+  W->deleteObj = delete_splitddl;
+  W->priv.split.nn = nn;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif 
+
+  /* store smaller whts */
+  for (i = 0; i < nn; i++) {
+    W->priv.split.Ws[i] = Ws[i];
+    W->priv.split.ns[i] = Ws[i]->N;
+  }
+
+  return W;
+}
+
+
+/* end of adding splitddl */
+
+#endif 
+
+
+#ifdef PARA_ON
+
+static void apply_p_split(Wht *W, long S, wht_value *x) {
+  long block, chunk;
+  long N, R, S1, Ni, j;
+  wht_value *xpt;
+  long total, id;
+#ifdef IL_ON
+  int nIL;
+#endif
+
+  if (W->priv.split.nn > P_SPLIT_MAX_FACTORS) {
+    Error_int2("%d > %d, too many factors for p_split", 
+        W->priv.split.nn, P_SPLIT_MAX_FACTORS);
+  }
+
+  if (omp_in_parallel()) {
+    N  = W->N;
+    Ni = W->priv.split.ns[1];
+    R = W->priv.split.ns[0];
+
+    block = Ni * S;
+    for (j = 0, xpt = x; j < R; ++ j, xpt += block)
+      wht_apply(W->priv.split.Ws[1], S, xpt);
+
+#ifdef IL_ON
+    if((W->priv.split.Ws[0])->type != wht_small_il) {
+      for (j = 0, xpt = x; j < Ni; ++ j, xpt += S)
+        wht_apply(W->priv.split.Ws[0], block, xpt);
+    } else {
+      long temp;
+      nIL = (W->priv.split.Ws[0])->nILNumber;
+      temp = S * nIL;
+      for (j = 0, xpt = x; j < Ni; j += nIL, xpt += temp)
+        wht_apply_4_para(W->priv.split.Ws[0], block, S, xpt);
+    }
+#else
+    for (j = 0, xpt = x; j < Ni; ++ j, xpt += S)
+      wht_apply(W->priv.split.Ws[0], block, xpt);
+#endif
+  } 
+
+  else {
+#pragma omp parallel private (xpt, id, j, chunk) 
+    { /* start of parallel region */
+      N  = W->N;
+      Ni = W->priv.split.ns[1];
+      R = W->priv.split.ns[0];
+      total = omp_get_num_threads();
+      block = Ni * S;  
+
+      /* no scheduling
+      id = omp_get_thread_num();
+      while (id < R) {
+        xpt = x + id * block;  
+        wht_apply(W->priv.split.Ws[1], S, xpt);
+        id += total;
+      }*/
+
+      chunk = R / total;
+      if (chunk * total == R) {
+        id = omp_get_thread_num() * chunk;
+        for (j = 0; j < chunk; ++ j, ++ id) {
+          xpt = x + id * block;
+          wht_apply(W->priv.split.Ws[1], S, xpt);
+        }
+      } else {
+        ++ chunk;
+        id = omp_get_thread_num() * chunk;
+        if (id <= R - chunk) {
+          for (j = 0; j < chunk; ++ j, ++ id) {
+            xpt = x + id * block;
+            wht_apply(W->priv.split.Ws[1], S, xpt);
+          }
+        } else if (id < R) {
+          for (; id < R; ++ id) {
+            xpt = x + id * block;
+            wht_apply(W->priv.split.Ws[1], S, xpt);
+          }
+        }
+      }
+
+#pragma omp barrier
+#ifdef IL_ON
+      if((W->priv.split.Ws[0])->type != wht_small_il) {
+        /* no scheduling
+        id = omp_get_thread_num();
+        while (id < Ni) {
+          xpt = x + (int) (id * S);  
+          wht_apply(W->priv.split.Ws[0], block, xpt);
+          id += total;
+        }*/
+
+        chunk = Ni / total;
+        if (chunk * total == Ni) {
+          /* each thread has an equal share of work */
+          id = omp_get_thread_num() * chunk;
+          for (j = 0; j < chunk; ++ j, ++ id) {
+            xpt = x + id * S;
+            wht_apply(W->priv.split.Ws[0], block, xpt);
+          }
+        } else {
+          /* some threads have more work to do */      	
+          ++ chunk;
+          id = omp_get_thread_num() * chunk;
+          if (id <= Ni - chunk) {
+            for (j = 0; j < chunk; ++ j, ++ id) {
+              xpt = x + id * S;
+              wht_apply(W->priv.split.Ws[0], block, xpt);
+            }
+          } else if (id < Ni) {
+            for (; id < Ni; ++ id) {
+              xpt = x + id * S;
+              wht_apply(W->priv.split.Ws[0], block, xpt);
+            }
+          } else {
+            /* idle */
+          }
+        }
+
+      } else {
+        nIL = (W->priv.split.Ws[0])->nILNumber;
+        if (Ni < total * nIL) {
+          /* no scheduling */
+          id = omp_get_thread_num() * nIL;
+          while (id < Ni) {
+            xpt = x + id * S;  
+            wht_apply_4_para(W->priv.split.Ws[0], block, S, xpt);
+            id += total * nIL;
+          }
+
+        } else {
+          chunk = Ni / total;
+          if (chunk * total == Ni) {
+            id = omp_get_thread_num() * chunk;
+            for (j = 0; j < chunk; j += nIL, id += nIL) {
+              xpt = x + id * S;
+              wht_apply_4_para(W->priv.split.Ws[0], block, S, xpt);
+            }
+          } else {
+            chunk = (Ni / (total * nIL)) * nIL;
+            chunk += nIL;
+            id = omp_get_thread_num() * chunk;
+            if (id <= Ni - chunk) {
+              for (j = 0; j < chunk; j += nIL, id += nIL) {
+                xpt = x + id * S;
+                wht_apply_4_para(W->priv.split.Ws[0], block, S, xpt);
+              }
+            } else if (id < Ni) {
+              for (; id < Ni; id += nIL) {
+                xpt = x + id * S;
+                wht_apply_4_para(W->priv.split.Ws[0], block, S, xpt);
+              }
+            }
+          }
+        }
+      }
+#else
+      chunk = Ni / total;
+      if (chunk * total == Ni) {
+        id = omp_get_thread_num() * chunk;
+        for (j = 0; j < chunk; ++ j, ++ id) {
+          xpt = x + id * S;
+          wht_apply(W->priv.split.Ws[0], block, xpt);
+        }
+      } else {
+        ++ chunk;
+        id = omp_get_thread_num() * chunk;
+        if (id <= Ni - chunk) {
+          for (j = 0; j < chunk; ++ j, ++ id) {
+            xpt = x + id * S;
+            wht_apply(W->priv.split.Ws[0], block, xpt);
+          }
+        } else if (id < Ni) {
+          for (; id < Ni; ++ id) {
+            xpt = x + id * S;
+            wht_apply(W->priv.split.Ws[0], block, xpt);
+          }
+        }
+      }
+#endif
+    } /*end of parallel region*/
+  }
+}
+
+static void delete_p_split(Wht *W) {
+  int i;
+
+  for (i = 0; i < W->priv.split.nn; i++) {
+    Free(W->priv.split.Ws[i]);
+  }
+  Free(W);
+}
+
+Wht *wht_new_p_split(int nn, Wht *Ws[]) {
+  Wht *W;
+  long i;
+  long N = 1;
+  int n = 0;
+
+  /* compute size of wht */
+  for (i = 0; i < nn; i++) {
+    N *= Ws[i]->N;
+    n += Ws[i]->n;
+  }
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_p_split;
+  W->N         = N;
+  W->n         = n;
+#ifdef IL_ON
+  W->nILNumber = 1;
+#endif
+  W->apply     = apply_p_split;
+  W->deleteObj = delete_p_split;
+  W->priv.split.nn = nn;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif 
+
+  /* store smaller whts */
+  for (i = 0; i < nn; i++) {
+    W->priv.split.Ws[i] = Ws[i];
+    W->priv.split.ns[i] = Ws[i]->N;
+  }
+
+  return W;
+}
+/* end of adding p_split */
+
+
+#define p_reorganization(x,n,n1,s,p) \
+if ((s) == 1) {         \
+  p_transpose(x,n,n1,p);    \
+} else {                \
+  p_transpose_stride(x,n,n1,s,p); \
+} 
+
+/* Split WHT using PARA openMP
+   -------------------------
+   A WHT_N can be split into two WHT's of smaller size
+   (according to N = N_1 * N_2):
+
+                              WHT_N_1 tensor 1_(N/N_1) *
+     1_N_1             tensor WHT_N_2 
+
+   The WHT_N is performed by stepping through this product
+   from right to left.
+*/
+
+static void apply_p_splitddl(Wht *W, long S, wht_value *x) {
+  long block, chunk;
+  long N, R, S1, Ni, j;
+  wht_value *xpt;
+  long total, id;
+  int left=0, right=1;
+
+  if (W->priv.split.nn > P_SPLITddl_MAX_FACTORS) {
+    Error_int2("%d > %d, too many factors for p_splitddl", 
+        W->priv.split.nn, P_SPLITddl_MAX_FACTORS);
+  }
+
+  if (W->priv.split.ns[1] < W->priv.split.ns[0]) {
+    left = 1;
+    right = 0;
+  }
+
+  if (omp_in_parallel()) {
+    N  = W->N;
+    Ni = W->priv.split.ns[right];
+    R = W->priv.split.ns[left];
+
+    block = Ni * S;
+    for (j = 0, xpt = x; j < R; ++ j, xpt += block)
+      wht_apply(W->priv.split.Ws[right], S, xpt);
+
+    /* with DDL */
+    p_reorganization(x, N, R, S, 0);
+    block = R * S;
+    for (j = 0, xpt = x; j < Ni; ++ j, xpt += block)
+      wht_apply(W->priv.split.Ws[left], S, xpt);
+    p_reorganization(x, N, R, S, 0);
+    
+    /* without DDL
+    for (j = 0, xpt = x; j < Ni; ++ j, xpt += S)
+    wht_apply(W->priv.split.Ws[0], block, xpt);*/
+  } 
+  else {
+#pragma omp parallel private (xpt, id, chunk, j) 
+    { 
+      N  = W->N;
+      Ni = W->priv.split.ns[right];
+      R = W->priv.split.ns[left];
+      block = Ni * S;  
+      total = omp_get_num_threads();
+
+      /* no scheduling
+      id = omp_get_thread_num();
+      while (id < R) {
+        xpt = x + id * block;  
+        wht_apply(W->priv.split.Ws[right], S, xpt);
+        id += total;
+      }*/
+
+      chunk = R / total;
+      if (chunk * total == R) {
+        id = omp_get_thread_num() * chunk;
+        for (j = 0; j < chunk; ++ j, ++ id) {
+          xpt = x + id * block;
+          wht_apply(W->priv.split.Ws[right], S, xpt);
+        }
+      } else {
+        ++ chunk;
+        id = omp_get_thread_num() * chunk;
+        if (id <= R - chunk) {
+          for (j = 0; j < chunk; ++ j, ++ id) {
+            xpt = x + id * block;
+            wht_apply(W->priv.split.Ws[right], S, xpt);
+          }
+        } else if (id < R) {
+          for (; id < R; ++ id) {
+            xpt = x + id * block;
+            wht_apply(W->priv.split.Ws[right], S, xpt);
+          }
+        }
+      }
+
+
+#pragma omp barrier
+      p_reorganization(x, N, R, S, 1);
+  
+#pragma omp barrier
+      block = R * S;
+      /* no scheduling
+      id = omp_get_thread_num();
+      while (id < Ni) {
+        xpt = x + id * block;  
+        wht_apply(W->priv.split.Ws[left], S, xpt);
+        id += total;
+      }*/
+
+      chunk = Ni / total;
+      if (chunk * total == Ni) {
+        id = omp_get_thread_num() * chunk;
+        for (j = 0; j < chunk; ++ j, ++ id) {
+          xpt = x + id * block;
+          wht_apply(W->priv.split.Ws[left], S, xpt);
+        }
+      } else {
+        ++ chunk;
+        id = omp_get_thread_num() * chunk;
+        if (id <= Ni - chunk) {
+          for (j = 0; j < chunk; ++ j, ++ id) {
+            xpt = x + id * block;
+            wht_apply(W->priv.split.Ws[left], S, xpt);
+          }
+        } else if (id < Ni) {
+          for (; id < Ni; ++ id) {
+            xpt = x + id * block;
+            wht_apply(W->priv.split.Ws[left], S, xpt);
+          }
+        }
+      }
+
+#pragma omp barrier
+      p_reorganization(x, N, R, S, 1);
+     
+    } /*end of parallel region*/
+  }
+}
+
+static void delete_p_splitddl(Wht *W) {
+  int i;
+
+  for (i = 0; i < W->priv.split.nn; i++) {
+    Free(W->priv.split.Ws[i]);
+  }
+  Free(W);
+}
+
+Wht *wht_new_p_splitddl(int nn, Wht *Ws[]) {
+  Wht *W;
+  long i;
+  long N = 1;
+  int n = 0;
+
+  /* compute size of wht */
+  for (i = 0; i < nn; i++) {
+    N *= Ws[i]->N;
+    n += Ws[i]->n;
+  }
+
+  W            = (Wht *) Malloc(sizeof(Wht));
+  W->type      = wht_p_splitddl;
+  W->N         = N;
+  W->n         = n;
+#ifdef IL_ON
+  W->nILNumber = 1;
+#endif
+  W->apply     = apply_p_splitddl;
+  W->deleteObj = delete_p_splitddl;
+  W->priv.split.nn = nn;
+#ifdef PCL_PROFILE
+  W->pcl       = 0;
+#endif 
+
+  /* store smaller whts */
+  for (i = 0; i < nn; i++) {
+    W->priv.split.Ws[i] = Ws[i];
+    W->priv.split.ns[i] = Ws[i]->N;
+  }
+
+  return W;
+}
+
+/* end of adding p_splitddl */
+#endif 
+
+
+
+/* Printing and Parsing WHT trees
+   ==============================
+*/
+
+/* print1( <string>, <indent>, <indentstep>, <wht> )
+   -------------------------------------------------
+     prints the wht algorithm represented by <wht> into <string>
+     which must be previously allocated and large enough to hold 
+     the result. <indent> gives the current indentation, <indentstep>
+     the amount of which <indent> has to be increased by going
+     to a higher level. A negative <indentstep> causes the string 
+     to be printed without any spaces or line breaks.
+*/
+
+static int print1(char *out, int ind, int indstep, Wht *W) {
+
+  int n, dn, i;
+
+#define print_string(ind, s) \
+  { int i; \
+    for (i = 0; i < ind*indstep; i++) { \
+      dn = sprintf(out+n, " "); \
+      if (dn < 0) Error("sprintf() failed"); \
+      n += dn; } \
+    dn = sprintf(out+n, s); \
+    if (dn < 0) Error("sprintf() failed"); \
+    n += dn; } \
+
+#define print_string_int(ind, s, x) \
+  { int i; \
+    for (i = 0; i < ind*indstep; i++) { \
+      dn = sprintf(out+n, " "); \
+      if (dn < 0) Error("sprintf() failed"); \
+      n += dn; } \
+    dn = sprintf(out+n, s, x); \
+    if (dn < 0) Error("sprintf() failed"); \
+    n += dn; } \
+
+#define print_wht(ind, W) \
+  { dn = print1(out+n, ind, indstep, W); \
+    if (dn < 0) Error("sprintf() failed"); n += dn; }
+
+  n = 0;
+  switch (W->type) {
+
+  case wht_null:
+    print_string_int(ind, "null[%d]", W->n);
+    break;
+
+  case wht_direct:
+    print_string_int(ind, "direct[%d]", W->n);
+    break;
+
+  case wht_small:
+    print_string_int(ind, "small[%d]", W->n);
+    break;
+
+  case wht_split:
+    if (indstep < 0) {
+      print_string(0, "split[");
+      print_wht(ind, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",");
+        print_wht(ind, W->priv.split.Ws[i]);
+      }
+      print_string(0, "]");
+    }
+    else {
+      print_string(ind, "split[\n");
+      print_wht(ind+1, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",\n");
+        print_wht(ind+1, W->priv.split.Ws[i]);
+      }
+      print_string(0, "\n");
+      print_string(ind, "]");
+    }
+    break;
+
+#ifdef DDL_ON
+  case wht_splitddl:
+    if (indstep < 0) {
+      print_string(0, "splitddl[");
+      print_wht(ind, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",");
+        print_wht(ind, W->priv.split.Ws[i]);
+      }
+      print_string(0, "]");
+    }
+    else {
+      print_string(ind, "splitddl[\n");
+      print_wht(ind+1, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",\n");
+        print_wht(ind+1, W->priv.split.Ws[i]);
+      }
+      print_string(0, "\n");
+      print_string(ind, "]");
+    }
+    break;
+#endif
+
+#ifdef IL_ON
+  case wht_small_il:
+    if( W->nILNumber == 2 ) {
+    	print_string_int(ind, "smallil1[%d]", W->n);
+    } else if ( W->nILNumber == 4 ) {
+    	print_string_int(ind, "smallil2[%d]", W->n);
+    } else if ( W->nILNumber == 8 ) {
+    	print_string_int(ind, "smallil3[%d]", W->n);
+    } else if ( W->nILNumber == 16 ) {
+    	print_string_int(ind, "smallil4[%d]", W->n);
+    } else if ( W->nILNumber == 32 ) {
+    	print_string_int(ind, "smallil5[%d]", W->n);
+    }
+    break;    
+#endif
+
+#ifdef PARA_ON
+  case wht_p_splitddl:
+    if (indstep < 0) {
+      print_string(0, "p_splitddl[");
+      print_wht(ind, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",");
+        print_wht(ind, W->priv.split.Ws[i]);
+      }
+      print_string(0, "]");
+    }
+    else {
+      print_string(ind, "p_splitddl[\n");
+      print_wht(ind+1, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",\n");
+        print_wht(ind+1, W->priv.split.Ws[i]);
+      }
+      print_string(0, "\n");
+      print_string(ind, "]");
+    }
+    break;
+
+  case wht_p_split:
+    if (indstep < 0) {
+      print_string(0, "p_split[");
+      print_wht(ind, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",");
+        print_wht(ind, W->priv.split.Ws[i]);
+      }
+      print_string(0, "]");
+    }
+    else {
+      print_string(ind, "p_split[\n");
+      print_wht(ind+1, W->priv.split.Ws[0]);
+      for (i = 1; i < W->priv.split.nn; i++) {
+        print_string(0, ",\n");
+        print_wht(ind+1, W->priv.split.Ws[i]);
+      }
+      print_string(0, "\n");
+      print_string(ind, "]");
+    }
+    break;
+#endif
+
+  default:
+    Error_int("unrecognized type: %d", W->type);
+    break;
+  }
+
+  return n;
+
+#undef print_string
+#undef print_wht
+#undef print_newline
+}
+
+
+/* string wht_print( <indentstep>, <wht> )
+   ---------------------------------------
+     prints the algorithm represented by <wht> into a string
+     and returns it. <indentstep> controls indentation while 
+     stepping down recursion. A negative value causes the string 
+     to be printed without spaces or line breaks.
+
+     The syntax is given in BNF as:
+
+     <wht> ::=
+       null[ <int> ] 
+     | direct[ <int> ]
+     | small[ <int> ]
+     | split[ <wht>, .., <wht> ]
+
+     where <int> represents log2 of the size of the <wht>.
+*/
+
+/* Example:
+   --------
+   indentstep = 1:
+
+split[
+ direct[1],
+ direct[1],
+ split[
+  direct[1],
+  direct[1]
+ ]
+]
+
+   indentstep = 2:
+   
+split[
+  direct[1],
+  direct[1],
+  split[
+    direct[1],
+    direct[1]
+  ]
+]
+
+   indentstep = -1:
+
+split[direct[1],direct[1],split[direct[1],direct[1]]]
+*/
+
+
+char *wht_print(int indstep, Wht *W) {
+  char *out, *out1;
+  int   n;
+
+  /* print into sufficiently large buffer first, then copy */
+  out1 = (char *) Malloc( 10000 * sizeof(char) );
+  n    = print1(out1, 0, indstep, W);
+  out  = (char *) Malloc( (n+1) * sizeof(char) );
+  strcpy(out, out1);
+  Free(out1);
+  return out;
+}
+
+
+/* int parse_int( <string>, <int> )
+   ----------------------------------------------
+     parses an integer from <string> and stores it into <int>.
+     The function returns the number of characters consumed.
+     The integer must have maximal 2 digits.
+*/
+
+static int parse_int(char *in, int *x) {
+  int n, i;
+
+  /* the integer is in[0], .., in[n-1] */
+  n = 0;
+  while (('0' <= in[n]) && (in[n] <= '9'))
+    ++n;
+  if (n == 0) 
+    Error("digits expected in wht_parse()");
+ 
+  /* convert to (int) x */
+  if (n > 2) { 
+    Error("integer too large in wht_parse()");
+  } else {
+    *x = 0;
+    for (i = 0; i < n; ++i)
+      *x = 10*(*x) + ((int) (in[i]) - (int) '0');
+  }
+
+  return n;
+}
+
+
+static int parse_wht(char *in, Wht **W) {
+
+  int len, n, nn;
+  char *msg;
+  Wht *Ws[SPLIT_MAX_FACTORS];
+
+#ifdef IL_ON
+  int i;
+  long sizeRight;
+#endif
+
+#define isFunctor(f) \
+  ((len == (int) strlen(f)) && (strncmp(in, f, len) == 0)) 
+
+#define read_int(x) \
+  { len += parse_int(in+len, &x); }
+
+#define read_wht(W) \
+  { len += parse_wht(in+len, &(W)); }
+
+#define require(c) \
+  { if (in[len] == (c)) { len++; } else { msg = (char *) Malloc(200); \
+    sprintf(msg, "'%c' expected in wht_parse()", c); \
+    Error(msg); } }
+
+  /* read the functor up to '[' */
+  len = 0;
+  while ((in[len] != (char)0) && (in[len] != '['))
+    len++;
+
+  if isFunctor("null") {
+    require('[');
+    read_int(n);
+    require(']');
+    *W = wht_new_null(n);
+    return len;
+  } 
+
+  else if isFunctor("direct") {
+    require('[');
+    read_int(n);
+    require(']');
+    *W = wht_new_direct(n);
+    return len;
+  } 
+
+  else if isFunctor("small") {
+    require('[');
+    read_int(n);
+    require(']');
+    *W = wht_new_small(n);
+    return len;
+  } 
+
+  else if isFunctor("split") {
+    require('[');
+    nn = 0;
+    read_wht(Ws[0]); 
+    nn++;
+    while (in[len] == ',') {
+      if (nn == SPLIT_MAX_FACTORS)
+        Error("too many arguments for split[ ] in wht_parse()");
+      require(',');
+      read_wht(Ws[nn]);
+      nn++;
+    }
+    require(']');
+
+#ifdef IL_ON
+    if(Ws[nn-1]->type == wht_small_il ) {
+	Error("Right most child of split can not be interleaved");
+    }
+    /*   The original guard for binary tree.
+    if( i > 1 ) {
+    	if( Ws[nn-2]->type==wht_small_il && Ws[nn-2]->nILNumber>Ws[nn-1]->N ) {
+		Error("2 WHTs cannot be interleaved 4 times");
+	}
+    }
+    */
+    i = nn-1;
+    sizeRight = Ws[i]->N;
+    while(i>=1) {
+        if( (Ws[i-1]->type==wht_small_il) && ((Ws[i-1]->nILNumber)>sizeRight) ) {
+		Error("n WHTs cannot be interleaved more than n times");
+        }
+	sizeRight *= Ws[i-1]->N;
+	i--;
+    }
+#endif
+
+    *W = wht_new_split(nn, Ws);
+    return len;
+  }
+
+#ifdef DDL_ON
+  else if isFunctor("splitddl") {
+    require('[');
+    nn = 0;
+    read_wht(Ws[0]); 
+#ifdef IL_ON
+    if(Ws[0]->type == wht_small_il) {
+	Error("left child of splitddl can not be interleaved");
+    }
+#endif
+    nn++;
+    while (in[len] == ',') {
+      if (nn == SPLITddl_MAX_FACTORS)
+        Error("too many arguments for splitddl[ ] in wht_parse()");
+      require(',');
+      read_wht(Ws[nn]);
+      nn++;
+    }
+    require(']');
+#ifdef IL_ON
+    if(Ws[nn-1]->type == wht_small_il ) {
+	Error("Right most child of splitddl can not be interleaved");
+    }
+#endif
+    *W = wht_new_splitddl(nn, Ws);
+    return len;
+  }
+#endif
+
+
+#ifdef PARA_ON
+  else if isFunctor("p_splitddl") {
+    require('[');
+    nn = 0;
+    read_wht(Ws[0]); 
+#ifdef IL_ON
+    if(Ws[0]->type == wht_small_il) {
+	Error("left child of p_splitddl can not be interleaved");
+    }
+#endif
+    nn++;
+    while (in[len] == ',') {
+      if (nn == P_SPLITddl_MAX_FACTORS)
+        Error("too many arguments for p_splitddl[ ] in wht_parse()");
+      require(',');
+      read_wht(Ws[nn]);
+      nn++;
+    }
+    require(']');
+#ifdef IL_ON
+    if(Ws[nn-1]->type == wht_small_il ) {
+	Error("Right most child of p_splitddl can not be interleaved");
+    }
+#endif
+    *W = wht_new_p_splitddl(nn, Ws);
+    return len;
+  }
+
+  else if isFunctor("p_split") {
+    require('[');
+    nn = 0;
+    read_wht(Ws[0]); 
+    nn++;
+    while (in[len] == ',') {
+      if (nn == P_SPLIT_MAX_FACTORS)
+        Error("too many arguments for p_split[ ] in wht_parse()");
+      require(',');
+      read_wht(Ws[nn]);
+      nn++;
+    }
+    require(']');
+
+#ifdef IL_ON
+    if(Ws[nn-1]->type == wht_small_il ) {
+	Error("Right most child of split can not be interleaved");
+    }
+    i = nn-1;
+    sizeRight = Ws[i]->N;
+    while(i>=1) {
+        if( (Ws[i-1]->type==wht_small_il) && ((Ws[i-1]->nILNumber)>sizeRight) ) {
+		Error("n WHTs cannot be interleaved more than n times");
+        }
+	sizeRight *= Ws[i-1]->N;
+	i--;
+    }
+#endif
+
+    *W = wht_new_p_split(nn, Ws);
+    return len;
+  }
+#endif
+
+
+#ifdef IL_ON
+
+#ifdef IL_LEVEL1
+  else if isFunctor("smallil1") {
+    require('[');
+    read_int(n);
+    if( n > 7 ) {
+    	Error("subproblem too large to be interleaved in wht_parse()");
+    }
+    require(']');
+    *W = wht_new_small_il(n,2);
+    return len;
+  } 
+#endif
+
+#ifdef IL_LEVEL2
+  else if isFunctor("smallil2") {
+    require('[');
+    read_int(n);
+    if( n > 6 ) {
+    	Error("subproblem too large to be interleaved in wht_parse()");
+    }
+    require(']');
+    *W = wht_new_small_il(n,4);
+    return len;
+  } 
+#endif
+
+#ifdef IL_LEVEL3
+  else if isFunctor("smallil3") {
+    require('[');
+    read_int(n);
+    if( n > 5 ) {
+    	Error("subproblem too large to be interleaved in wht_parse()");
+    }
+    require(']');
+    *W = wht_new_small_il(n,8);
+    return len;
+  } 
+#endif
+
+#ifdef IL_LEVEL4
+  else if isFunctor("smallil4") {
+    require('[');
+    read_int(n);
+    if( n > 4 ) {
+    	Error("subproblem too large to be interleaved in wht_parse()");
+    }
+    require(']');
+    *W = wht_new_small_il(n,16);
+    return len;
+  } 
+#endif
+
+#ifdef IL_LEVEL5
+  else if isFunctor("smallil5") {
+    require('[');
+    read_int(n);
+    if( n > 3 ) {
+    	Error("subproblem too large to be interleaved in wht_parse()");
+    }
+    require(']');
+    *W = wht_new_small_il(n,32);
+    return len;
+  } 
+#endif
+
+#endif
+
+  else 
+    Error("unrecognized functor in wht_parse()");
+}
+
+
+Wht *wht_parse(char *in) {
+  Wht *W;    /* the resulting structure */
+  char  *in1; /* a processed copy of in */
+  int    i;            /* index into in */
+
+  /* strip comments and whitespace from in */
+  in1 = (char *) Malloc( (strlen(in)+1) * sizeof(char) );
+  i   = 0;
+  while (*in != (char)0) {
+    switch (*in) {
+      case ' ':
+      case '\t':
+      case '\n':
+        ++in;
+        break;
+
+      case '(':
+        if (*(in+1) != '*') {
+          in1[i++] = *(in++);
+        } else {
+
+          /* skip comment */
+          do {
+            ++in;
+          } while (
+            (*in != (char)0) && 
+            ((*in != '*') || (*(in+1) != ')'))
+          );
+          if (*in == '*')
+            in += 2;
+        }
+        break;
+
+      default:
+        in1[i++] = *(in++);
+    }
+  }
+  in1[i] = (char)0;
+
+  /* parse */
+  parse_wht(in1, &W);
+  Free(in1);
+  return W;
+}
+
+

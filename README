@@ -1,0 +1,343 @@
+Documentation of the SPIRAL wht package
+=======================================
+Version: 1.8
+Date: 05/16/03
+
+
+Authors
+-------
+Markus Pueschel, pueschel@ece.cmu.edu
+Bryan Singer, bsinger@cs.cmu.edu
+Neungsoo Park, neungsoo@halcyon.usc.edu
+Bo Hong, bohong@halcyon.usc.edu
+Adrian Sox
+Kang Chen, kchen@mcs.drexel.edu
+
+Copyright
+---------
+See COPYING and COPYRIGHT which are distributed with this package.
+
+Installation
+------------
+See INSTALL
+
+Problems
+--------
+email to Markus Pueschel, pueschel@ece.cmu.edu
+
+Sources
+-------
+The package has been created as part of the SPIRAL project,
+http://www.ece.cmu.edu/~spiral, which pursues the goal of automating the
+implementation, optimization, and platform adaptation of digital signal
+processing (DSP) algorithms. 
+The design of this package is based on an fft package by Sebastian Egner,
+http://avalon.ira.uka.de/home/egner/
+Part of the file acinclude.m4 has been taken from the package FFTW,
+www.fftw.org.
+The function wht_pclprof for monitoring runtime events, needs the performance
+counter library, pcl 1.2 or 1.3, installed.
+
+Walsh-Hadamard Transform (WHT)
+------------------------------
+This package computed the linear transform
+  x -> WHT_(2^n) * x
+where the matrix WHT_(2^n) is given by
+  WHT_(2^n) = F_2 tensor .. tensor F_2,  F_2 = [[1, 1], [1, -1]].
+The transform is computed in-place, i.e., the input vector is destroyed.
+
+Other Transforms
+----------------
+If you want code for other transforms (DFT, DCT, etc.) try SPIRAL,
+http://www.ece.cmu.edu/~spiral
+
+How to use the package
+----------------------
+This directory contains an ADAPTABLE package for computing
+the Walsh-Hadamard transform. ADAPTABLE means that the package
+is able to customize itself for your computing platform.
+The transform is computed in-place, i.e., the input is destroyed.
+If you want to keep the input, perform a copy first.
+
+For installing from scratch, consult the INSTALL file.
+
+Using the package is very simple, an example looks like:
+
+#include "spiral_wht.h"
+
+int main(void) 
+{
+  Wht *Wht_tree;
+  wht_value x[16384]; /* a vector of doubles */
+  int n;
+
+  /* initialize somehow */
+  for (n = 0; n < 16384; x++) 
+    x[n] = (n & 1) * 2 - 1; 
+
+  /* get wht tree for 2^14 */
+  Wht_tree = wht_get_tree(14);
+
+#ifdef PARA_ON
+  /* if PARA is enabled, get a parallel wht tree
+     with default thread number */
+  Wht_tree = wht_get_p_tree(2, THREADNUM);
+#endif
+
+  /* compute wht_{2^14} */
+  wht_apply(Wht_tree, 1, input);  /* stride is 1 */
+
+  return(0);
+}
+
+
+WHT trees
+---------
+There are various ways of recursively computing the WHT_(2^n), arising from
+different breakdown strategies (we call it rules). Recursive use of these rules
+leads to a large number of different breakdown-trees or wht-trees representing
+different algorithms to compute a WHT(2^n). These algorithms differ in their
+data access pattern during computation, but have all exactly the same arithmetic
+cost of n/2 * 2^n adds and n/2 * 2^n subs = n * 2^n.
+
+0. rule small: (enabled by default)
+
+For small sizes, 2^n <= 2^8, we provide unrolled code modules that
+recursively compute a WHT(2^n) using
+  WHT(2^n) = (WHT(2) tensor 1_(2^(n-1))) * (1_2 tensor WHT(2^(n-1)))
+
+1. rule split: (enabled by default)
+
+Let n = n1 + .. + nk be a partition of n, then
+  WHT(2^n) =
+                                WHT_(2^n1) tensor 1_(2^(n-n1)) *
+     1_(2^n1)            tensor WHT_(2^n2) tensor 1_(2^(n-n1-n2)) *
+       ...
+       ...
+     1_(2^(n1+..n(k-1))) tensor WHT_(2^nk) 
+Recursive application of this rule alone gives rise to O(sqrt(8)^n/n^1.5)
+different ways of computing WHT_(2^n) (breakdown trees). Note that 
+all of them lead to the same arithmetic cost - they are distinguished 
+only by their data access pattern. Each factor 
+  1_a tensor WHT(2^ni) tensor 1_b
+gives rise to a double loop of the form
+  for i = 0..a-1 do
+    for j = 0..b-1 do
+      apply WHT(2^ni) at stride b
+    od
+  od
+
+2. rule splitddl (dynamic data layout): (enabled by --enable-DDL, see INSTALL)
+
+Let n = n1 + n2, then
+  WHT(2^n) = L_(2^n, 2^n2) * (1_(2^n2) tensor WHT(2^n1)) * L_(2^n, 2^n1) * 
+    (1_(2^n1) tensor WHT(2^n2)),
+where L(a, b), b | a denotes a stride permutation matrix:
+  L(a, b): i mapsto b*i mod a-1, for i = 0...a-2
+           a-1 mapsto a-1
+In words, the stride permutation flips the tensor product, thus trading the cost
+of these permutations for the cost of better data access in the tensor product.
+
+3. rule smallil (loop interleaving): (enabled by --enable-IL, see INSTALL)
+
+Loop interleaving provides a way of computing base cases of the form
+  WHT(2^n) tensor 1_2    (smallil1)   and
+  WHT(2^n) tensor 1_4    (smallil2)   and
+Instead of looping over 1_2 and 1_4, the computations of WHT(2^n) are interleaved,
+i.e., computed concurrently. This has the potential to decrease data cache misses.
+
+4. rule direct (by defintion): for verification only
+
+5. rule p_split (parallel split): (enabled by --enable-PARA=Thread number, see INSTALL)
+A parallel version of split. It supports binary split for now, but it can be expanded 
+to multiple split.
+
+6. rule p_splitddl (parallel split): (enabled by --enable-PARA=Thread number)
+A parallel version of splitddl. The stride permutation is parallelized in fine-grained.
+
+The different breakdown rules yield a simple grammar (given in BNF); wht(n) is non-terminal
+denoting a WHT(2^n).
+
+wht(n) ::=  
+    small[n]                     # a code module for wht(n) of unrolled code, only for n <= 8
+  | smallil1[n]                  # a code module for wht(n) tensor 1_2, only for n <= 7
+  | smallil2[n]                  # a code module for wht(n) tensor 1_4, only for n <= 6
+  | smallil3[n]                  # a code module for wht(n) tensor 1_8, only for n <= 5
+  | smallil4[n]                  # a code module for wht(n) tensor 1_16, only for n <= 4
+  | smallil5[n]                  # a code module for wht(n) tensor 1_32, only for n <= 3
+  | split[wht(n1), .., wht(nk)]  # a recursive split according to the formula above
+  | splitddl[wht(n1), wht(n2)]   # a recursive ddl split
+  | direct[n]                    # computing by defintion (for verification only)
+  | p_split[wht(n1), wht(n2)]    # a recursive parallel split
+  | p_splitddl[wht(n1), wht(n2)] # a recursive parallel splitddl
+
+wht(n) = smallil1[n] can be used whereever the wht(n) is computed at stride of
+at least 2, i.e.,
+  wht(2) = split[smallil1[1], small[1]]
+is valid, but
+  wht(2) = split[small[1], smallil1[1]]
+is not. Similarly, wht(n) = smallil2[n] can be used whereever wht(n) is used at
+stride of at least 4. (In other words, smallil*[n] is context-sensitive).
+
+An algorithm is given by a word (describing a breakdown tree) in the generated language, e.g.,
+a valid breakdown tree for a WHT of size 2^7 is 
+  splitddl[small[2], split[smallil1[4], small[1]]
+
+
+Publications
+------------
+About the WHT package:
+      Jeremy Johnson and Markus Pueschel
+      In Search of the Optimal Walsh-Hadamard Transform 
+      Proc. ICASSP 2000, pp. 3347-3350 
+About ddl:
+      Neungsoo Park and Viktor Prasanna
+      Cache Conscious Walsh-Hadamard Transform 
+      Proc. ICASSP 2001, Vol. II
+About loop interleaving
+      K. S. Gatlin and L. Carter
+      Faster FFTs via Architecture-Cognizance
+      Proc. PACT, 2000.
+About the parallel WHT with OpenMP
+      Kang Chen and Jeremy Johnson
+      A Prototypical Self-Optimization Package for Parallel Implementation of Fast
+      Signal Transforms. IPDPS 2002.
+
+A journal paper on this package is in preparation.
+
+
+Platform adaptation
+-------------------
+The package achieves platform adaptation by searching good break-down trees and 
+storing them (see file INSTALL_DIR/var/wht_trees). On installation some default 
+trees are used (which, however should perform well since they have been found 
+on a similar machine, if you are using PII/Linux, or SUN). The file wht_trees 
+can be updated by two search functions. One is a dynamic programming approach,
+try
+
+  wht_dp.prl -h
+
+e.g.
+
+  wht_dp.prl -l12 -u15 
+
+updates the table from size 12 to 15 (i.e. 2^12 to 2^15).
+Another search function uses a genetic algorithm, try
+
+  wht_ga -h
+
+e.g.
+
+  wht_ga 17 -p 150 -g 150 -b 20 -c 40 -m 20 -s 73898
+
+updates size 2^17 using a population size of 150 and 150 generations.
+This takes a couple of hours.
+
+
+Doing experiments
+-----------------
+
+For runtime measurements:
+
+  wht_measure
+
+  example: 
+    wht_measure -w "split[small[1], small[2]]"
+    1.497269e-06
+
+For pcl monitoring: 
+  (pclprof needs the pcl library 1.2 or later to be installed:
+   http://www.fz-juelich.de/zam/PCL/)
+  
+  wht_pclprof
+
+  example:
+    wht_pclprof -e "PCL_L1DCACHE_MISS" -w "split[small[1], small[2]]"
+    663
+
+Try 
+
+  hpm -s
+
+to find out which events can be measured on your machine.
+You can also configure using
+
+  --enable-PCL_PROF
+
+(see INSTALL) to profile wht trees with respect to events.
+
+  example:
+    wht_pclprof -e "PCL_L1DCACHE_MISS" -w "split[small[1], small[2]]"
+
+which yields
+           16
+Rightmost child is lowest and computed first!
+Event: PCL_L1DCACHE_MISS
+Tree profile:
+Node  3:         16,  overhead:        5 pcl
+  Node  1:          3
+  Node  2:          8
+
+
+History
+-------
+
+10/05/99: first version
+11/09/99: bug in breakdown strategy fixed
+02/10/00: pclprof.c rewritten
+07/01/00: installation via configure
+08/01/00: bug removed which affected left expanded trees
+08/08/00: pcl profiling added
+11/18/00: ddl added
+12/03/01: loop interleaving added, some cleaning up
+01/27/02: 5 level loop interleaving, small bugs removed, configure.in improved
+03/01/02: ported to mac with darwin (os x); benchmark tool added (tools/bench)
+03/19/02: parallel algorithm support added, some cleaning up
+05/16/03: little memory leakage removed (delete for split and splitddl)
+          thanks to Remy Bruno for reporting
+
+File/directory information
+---------------------------
+
+Files                 Explanation
+
+COPYING               Copyright
+COPYRIGHT             information
+README                This file
+INSTALL               Installation instructions
+Makefile.in           Template for the Makefile, used by configure
+besttrees.*           initial best WHT trees found for various systems
+codegen/              Directory containing different code generators
+                      for unrolled small whts, can be chosen in the Makefile
+                      See codegen/README for infos
+config.guess          Routine needed by configure
+config.sub            Routine needed by configure
+configure             Shell script that detects system information and sets
+                      install variables
+configure.in          Template for configure; autoconf uses this file to 
+                      create the configure script
+ga/                   Directory containing the source code for a genetic
+                      algorithm on WHT trees
+install-sh            Install script, used in the Makefile
+makelib               Shell script for creating and compiling the codelets
+measure.c             Source code for runtime measurement
+mkinstalldirs         Another installation script
+pclprof.c             Investigation of events (cache misses etc.) using 
+                      the pcl library
+retime.prl.in         Template for retime.prl, used by configure
+simplop.prl.in        Template for simplop.prl, a perl program for 
+                      simplifying arithmetic expressions, used by makelib
+verify.c              Verification
+spiral_wht.c          Main C file
+spiral_wht.h          Header file
+test.c                Check that everything is installed correctly
+tools/                Directory with tools
+transpose.c           matrix transposition
+transpose_stride.c    matrix transposition with stride
+transpose.h.in        header file for matix transposition used by ddl
+wht_dp_*              dynamic programming search for fast trees
+wht_trees.c           C code for loading and saving the best trees found so far
+p_transpose.c         parallel matrix transposition
+p_transpose_stride.c  parallel matrix transposition with stride
+parallel.h.in         header file for parallel computing
+

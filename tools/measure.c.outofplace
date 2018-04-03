@@ -1,0 +1,245 @@
+/*
+ * Copyright (c) 2000 Carnegie Mellon University
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
+ */
+
+/* Runtime measurement for the WHT package
+   =======================================
+*/
+
+/* measure 
+     [ -s <stride> ] # <wht> tensor I_<stride> is measured
+     [ -t <num> ]    # sec. to measure, default = 1
+     [ -g ]          # output in gap syntax
+     -w <wht-method>
+
+   measures <wht-method> given as a string in wht-syntax
+   applied as
+     wht_apply( wht, <stride>, x)
+   by repeating it at least <num> (a float) seconds. The time
+   returned is for one wht, performed on a vector of length
+   <size-wht> x <stride>. If <stride> is > 1 then an entire
+   <wht> tensor 1_<stride> is performed and the average time
+   of one <wht> returned. Performing only one <wht> with <stride>
+   my produce bad timings.
+   <stride> must be a 2-power. The default for stride is 1.
+   The option '-g' prints the output in gap readable syntax, i.e.
+     theInput := <t>
+   where <t> is an integer representing the time in us/10.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include "spiral_wht.h"
+
+/* copy a vector */
+#define COPY(N, x, y) { int ii; for (ii = 0; ii < N; ii++) y[ii] = x[ii]; }
+
+/* random doubles in [0, 1] */
+#define RAND() ((wht_value) (rand() + 1.0L))/RAND_MAX
+
+double gettime(void) {
+  clock_t t;
+
+  t = clock();
+  if (t == -1) {
+    fprintf(stderr, "error in clcok()\n");
+    exit(-1);
+  }
+  return (double) t/CLOCKS_PER_SEC;
+}
+
+int main(int argc, char *argv[])
+{
+  int n;
+  long stride = 1;
+  float t = 1.0;
+  long N, i, j;
+  char c;
+  int gap = 0;
+  Wht *W = NULL;
+  wht_value *x;
+  wht_value *y;
+  long reps;
+  double t1, time;
+
+  if (argc == 1) {
+    printf(
+      "usage: measure\n"
+      "  [ -s <stride> ]\n"
+      "  [ -t <num> ]\n"
+      "  [ -g ]\n"
+      "  -w <wht-method>\n"
+    );
+    exit(0);
+  }
+
+#define CHECK_ARG() {if (argc == n+1) { \
+  fprintf(stderr, "error, argument for option '-%c' missing\n", c); \
+  exit(-1); } }
+
+  /* check options and arguments */
+  n = 0;
+  while (++n < argc) {
+    if (*argv[n]++ == '-') {
+      c = *argv[n];
+      switch (c) {
+      case 's':
+
+        CHECK_ARG();
+
+        /* stride */
+        sscanf(argv[++n], "%ld", &stride);
+        break;
+
+      case 't':
+
+        CHECK_ARG();
+
+        /* number of seconds to be measured */
+        sscanf(argv[++n], "%f", &t);
+        break;
+
+      case 'g':
+
+        gap = 1;
+        break;
+
+      case 'w':
+
+        CHECK_ARG();
+
+        /* create wht to be verified */
+        W = wht_parse(argv[++n]);
+        break;
+
+      default:
+        fprintf(stderr, "error, illegal option %c\n", c);
+        exit(-1);
+      }
+    }
+    else {
+      fprintf(stderr, "error, options must be preceded by '-'\n");
+      exit(-1);
+    }  
+  }
+
+#undef CHECK_ARG
+
+  /* wht present? */
+  if (W == NULL) {
+    fprintf(stderr, "wht must be given\n");
+    exit(-1);
+  }
+
+  /* parameters */
+  n = W->n;
+  N = (W->N) * stride;
+
+  /* allocate vectors */
+  x = (wht_value *) malloc(N * sizeof(wht_value));
+  y = (wht_value *) malloc(N * sizeof(wht_value));
+
+  if ((x==NULL) || (y==NULL)) {
+    fprintf(stderr, "out of memory\n");
+    exit(-2);
+  }
+
+  for (i = 0; i < N; i++)
+    x[i] = RAND();  
+
+  if (stride == 1) {
+
+    /* how many repetitions? */
+    reps = 1;
+    time = 0;
+    while (time < t) {
+      t1 = gettime();
+      for (i = 0; i < reps; i++) {
+        COPY(N, x, y);
+        wht_apply(W, stride, y);
+      }
+      time = gettime() - t1;
+      reps *= 2;
+    }
+    reps /= 2;
+
+    /* measure */
+    t1   = gettime();
+    for (i = 0; i < reps; i++) {
+      COPY(N, x, y);
+      wht_apply(W, stride, y);
+    }
+    time = gettime() - t1;
+
+
+    /* substract copies */
+    t1 = gettime();
+    for (i = 0; i < reps; i++) {
+      COPY(N, x, y);
+    }
+    time = time - (gettime() - t1);
+
+  }
+  else {
+
+    /* how many repetitions? */
+    reps = 1;
+    time = 0;
+    while (time < t) {
+      t1 = gettime();
+      for (i = 0; i < reps; i++) {
+        COPY(N, x, y);
+        for (j = 0; j < stride; j++)
+          wht_apply(W, stride, y+j);
+      }
+      time = gettime() - t1;
+      reps *= 2;
+    }
+    reps /= 2;
+
+    /* measure */
+    t1   = gettime();
+    for (i = 0; i < reps; i++) {
+      COPY(N, x, y);
+      for (j = 0; j < stride; j++)
+        wht_apply(W, stride, y+j);
+    }
+    time = gettime() - t1;
+
+    /* substract copies */
+    t1 = gettime();
+    for (i = 0; i < reps; i++) {
+      COPY(N, x, y);
+    }
+    time = time - (gettime() - t1);
+
+  }
+
+  if (gap == 0) 
+    printf("%e\n", time/(reps * stride));
+  else
+    printf(
+      "theInput := %ld; # us/10\n", 
+      (long) ((time/(reps * stride)) * 10000000)
+    );
+
+  return 0;
+}
+
+

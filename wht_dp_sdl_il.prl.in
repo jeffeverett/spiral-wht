@@ -1,0 +1,218 @@
+#!@PERL@
+
+$MAX_LEAF=8;
+$FIRST_SIZE=1;
+$LAST_SIZE=@MAXSIZE@;
+$NWAYS=2;
+$MEASURE_BIN="@MEASURE_LOC@/wht_measure";
+$IL_LEVEL=@IL@;
+$verbose=0;
+$debug=0;
+
+# Parse args
+foreach $x (@ARGV) {
+    if( $x =~ /^-l/ ) {
+	$x =~ s/^-l//;
+	$FIRST_SIZE=$x;
+    }
+    elsif( $x =~ /^-u/ ) {
+	$x =~ s/^-u//;
+	$LAST_SIZE=$x;
+    }
+    elsif( $x =~ /^-c/ ) {
+	$x =~ s/^-c//;
+	$NWAYS=$x;
+    }
+    elsif( $x =~ /^-b/ ) {
+	$x =~ s/^-b//;
+	$MEASURE_BIN=$x;
+    }
+    elsif( $x =~ /^-v/ ) {
+	$verbose=1;
+    }
+    elsif( $x =~ /^-d/ ) {
+	$debug=1;
+    }
+    else {
+	print "Does a dynamic programming search for better trees.\n";
+	print "If better trees are found, besttrees is updated accordingly.\n";
+	print "Usage:\n";
+	print "    dp.prl [-v] [-l<start size>] [-u<stop size>]\n";
+	print "      [-c<max children per node>] [-b<timing program>]\n";
+	print "\n";
+	print "Defaults are verbose off, l=1, u=@MAXSIZE@, c=2, b=\"./measure\"\n";
+	die "\n";
+    }
+}
+
+sub load_tree {
+    my $line;
+    my $n = $_[0];
+    my $N, $TREE, $TIME;
+
+    open BEST, "< @FULL_LOC@" or die "besttrees not found";
+
+    while($line=readline(*BEST)) {
+	if (($N, $TREE, $TIME) = ($line =~ /(\d+)\s+!\s+(\S+[\s+\S+]*)\s+!\s+(.*)/)) {
+	    if ($N == $n) { 
+		close BEST;
+		return ($TREE, $TIME);
+	    }
+	}
+    }
+
+    close BEST;
+    die "needed tree not found in besttrees";
+}
+
+sub write_tree {
+    my $n = $_[0];
+    my $line;
+    my $newTREE = $_[1];
+    my $newTIME = $_[2];
+    my @TreeTABLE, @TimeTABLE;
+    my $N, $TREE, $TIME;
+    my $percent;
+
+    open BEST, "< @FULL_LOC@";
+    while($line=readline(*BEST)) {
+	if (($N, $TREE, $TIME) = ($line =~ /(\d+)\s+!\s+(\S+[\s+\S+]*)\s+!(.*)/)) {
+	    if ($#TreeTABLE < $N) {$#TreeTABLE = $N; $#TimeTABLE = $N;}
+	    $TreeTABLE[$N] = $TREE;
+	    $TimeTABLE[$N] = $TIME;
+	}
+    }
+
+    close BEST;
+
+    if ($#TreeTABLE < $n) {
+	$#TreeTABLE = $n;
+	$#TimeTABLE = $n;
+	print "New tree for size $n added to table.\n";
+    } else {
+	if ($newTIME >= $TimeTABLE[$n]) {
+	    print "Best tree for size $n worse than old tree.\n";
+	    return;
+	} else {
+	    $percent = (1 - $newTIME / $TimeTABLE[$n]) * 100;
+	    printf("Best tree for size %d is %02.2f%% faster than old tree.  Updating tree table.\n", $n, $percent);
+	}
+    }
+
+    $TreeTABLE[$n] = $newTREE;
+    $TimeTABLE[$n] = $newTIME;
+   
+    open BEST, "> @FULL_LOC@";
+    for($N = 1; $N <= $#TreeTABLE; $N++) {
+	printf BEST "%d ! %s ! %9.3e\n", $N, $TreeTABLE[$N], $TimeTABLE[$N]; 
+    }
+    close BEST;
+}
+
+sub rec_gen_trees {
+   my $size=$_[0];
+   my $nways=$_[1];
+   my $split=$_[2];
+
+   my @formulas;
+   my $left, $x;
+
+   if( $nways > 1 ) {
+      for( $left=1; $left<=$size-1; $left++ ) {
+	 for $x (rec_gen_trees( $size-$left, $nways-1, 1 )) {
+	    $formulas[++$#formulas]="$best_formulas[$left], $x";
+	    if($IL_LEVEL>=1 && $left<=7 && $size-$left >=1 ) {
+	    	$formulas[++$#formulas]="smallil1[$left], $x";
+	    }
+	    if($IL_LEVEL>=2 && $left<=6 && $size-$left >=2 ) {
+	    	$formulas[++$#formulas]="smallil2[$left], $x";
+	    }
+	    if($IL_LEVEL>=3 && $left<=5 && $size-$left >=3 ) {
+	    	$formulas[++$#formulas]="smallil3[$left], $x";
+	    }
+	    if($IL_LEVEL>=4 && $left<=4 && $size-$left >=4 ) {
+	    	$formulas[++$#formulas]="smallil4[$left], $x";
+	    }
+	    if($IL_LEVEL>=5 && $left<=3 && $size-$left >=5 ) {
+	    	$formulas[++$#formulas]="smallil5[$left], $x";
+	    }
+	 }
+      }
+   }
+   if( $split == 1 ) {
+      $formulas[++$#formulas]="$best_formulas[$size]";
+   }
+
+   return @formulas;
+
+}
+
+sub gen_trees {
+   my $size=$_[0];
+
+   my @formulas;
+   my @halfFormulas;
+
+   @halfFormulas = rec_gen_trees( $size, $NWAYS, 0 );
+   for( $i=0; $i<=$#halfFormulas; $i++ ) {
+      $formulas[++$#formulas] = "split[ $halfFormulas[$i] ]";
+   }
+   if( $size <= $MAX_LEAF ) {
+      $formulas[++$#formulas]="small[$size]";
+   }
+
+   return @formulas;
+}
+
+
+
+
+for( $size=$FIRST_SIZE; $size<=$LAST_SIZE; $size++ ) {
+   printf( "Tree size of %d:\n", $size );
+   
+   if ($debug != 1) {
+   for ($size2 = 1; $size2 < $size; $size2++) {
+       ($best_formulas[$size2], $best_times[$size2])=load_tree($size2);
+   }
+   }
+
+   $best_time=999999e99;
+   if ($debug == 1) {
+      @dummy = gen_trees($size);
+       print "$#dummy\n";
+   } else {
+   for $formula (gen_trees( $size )) {
+      $time=`$MEASURE_BIN -c -w "$formula"`;
+      $time=~s/\n$//;
+      $time=~s/\s+//;
+      if ($verbose == 1) {
+	  print "  $formula ! $time\n";
+      }
+      if( $time < $best_time && $time != 0.0 ) {
+	  $best_formula = $formula;
+	  $best_time = $time;
+      }
+   }
+   
+   $best_formulas[$size]=$best_formula;
+   $best_times[$size]=$best_time;
+
+   if ($verbose == 1) {
+       print "\n Summary so far:\n";
+       for( $size2=1; $size2<=$size; $size2++ ) {
+	   printf("  %02d: $best_formulas[$size2] ! $best_times[$size2]\n", $size2);
+       }
+       print "\n";
+   }
+
+   write_tree($size, $best_formulas[$size], $best_times[$size]);
+   }	
+}
+
+if ($verbose == 1) {
+    print "\nSummary:\n";
+    for( $size=1; $size<=$LAST_SIZE; $size++ ) {
+	printf( " %02d: $best_formulas[$size] ! $best_times[$size]\n", $size );
+    }
+}
+

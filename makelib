@@ -1,0 +1,134 @@
+#!/bin/sh
+#
+# Copyright (c) 2000 Carnegie Mellon University
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+# Shell script for creating libwht.a
+# ==================================
+#
+# usage: 
+#   makelib 
+#     [ -c <compiler> ] 
+#     [ -o <opt> ] 
+#     [ -a <arflags> ]
+#     [ -n <num> ]
+#     [ -m <max problem size interleaved code> ]
+#     [ -l <interleave level> ]
+#
+# makelib creates the library libwht.a of unrolled wht
+# building blocks used by wht.c
+# The library contains object files with names
+#   s_<n>.o
+# containing (resp.) the function
+#   apply_small<n>(long R, Wht *W, long S, wht_value x)
+# which computes a
+#   1_R tensor WHT_(2^n) tensor 1_S on vector x.
+# At least s_1.o - s_8.o should be present.
+# The option -c allows to give the compiler to be used
+# (default is gcc) with optimization -o (default is -O3)
+# and the option -n <num> tells that
+# s_1.o - s_<num>.o are to be produced.
+# All files are compiled with the '-O3' option.
+
+# process arguments
+compiler=gcc
+opt=-O3
+arflags=
+n=8
+m=7
+l=2
+while [ $# -ge 1 ]; do
+  case $1 in
+    -c) compiler=$2
+    shift
+    ;;
+    -o) opt=$2
+    shift
+    ;;
+    -a) arflags=$2
+    shift
+    ;;
+    -n) n=$2
+    shift
+    ;;
+    -m) m=$2
+    shift
+    ;;
+    -l) l=$2
+    shift
+    ;;
+    *) echo "error: usage makelib [ -c <compiler> ] [ -o <opt> ] [ -n <num> ] [-m <max interleaved size>] [-l <interleave level>]"
+       exit
+    ;;
+  esac
+  shift
+done
+
+# check whether whtgen is available
+if [ ! -x whtgen ]; then
+  echo "error: whtgen is missing, try 'make whtgen'"
+  exit
+fi
+
+# create libwht.a if not present
+if [ ! -f libwht.a ]; then
+  ar $arflags r libwht.a
+fi
+
+# create s_<i>.o, i = 1..<n>, and add to libwht.a
+i=1
+while [ $i -le $n ]; do
+  ./whtgen -n $i | ./simplop.prl > s_$i.c
+  $compiler $opt -c s_$i.c
+  ar $arflags r libwht.a s_$i.o
+  i=`expr $i + 1`
+done
+
+
+i=1
+while [ $i -le $m ]; do
+    j=1
+    while [ $j -le $l ]; do
+	if [ $j -eq 1 ]; then
+	    k=2
+	elif [ $j -eq 2 ]; then
+	    k=4
+	elif [ $j -eq 3 ]; then
+	    k=8
+	elif [ $j -eq 4 ]; then
+	    k=16
+	elif [ $j -eq 5 ]; then
+	    k=32
+	fi
+
+	sufix=il${k}_s_$i
+
+	temp=`expr $i + $j`
+	if [ $temp -le 8 ]; then
+        	./whtgen -n $i -l $k | ./simplop.prl > il${k}_s_$i.c
+        	$compiler $opt -c il${k}_s_$i.c
+  		ar $arflags r libwht.a il${k}_s_$i.o
+	fi
+
+	j=`expr $j + 1`
+     done
+  i=`expr $i + 1`
+done
+
+# create index; apple-darwin needs that
+#ranlib libwht.a
+

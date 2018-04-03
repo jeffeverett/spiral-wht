@@ -1,0 +1,106 @@
+#!/bin/sh
+#
+# usage:
+#   bench 
+#     [ -r <ram-size> ] 
+#     [ -il "<IL level> <IL level> ..." ] 
+#     [ -ddl ]
+#     [ -para "<threadnum> <threadnum> ..." ]
+#
+# defaults are ram-size = 16 (MB), level is none,
+# ddl is not used, and para is not used.
+# 
+# ranges: 0 <= IL level <= 5 (currently)
+#
+# creates a benchmark over the configuration space given, by installing
+# and running DP. The resulting wht_trees files can be found in ./bench
+# everything is done locally, i.e., no files are created outside the directory
+# bench is invoked.
+
+# procees arguments
+ram=16
+il="0"
+ddl=0
+para=""
+while [ $# -ge 1 ]; do
+  case $1 in
+    -r) ram=$2
+    shift
+    ;;
+    -il) il=$2
+    shift
+    ;;
+    -ddl) ddl=1
+    ;;
+    -para) para=$2
+    shift
+    ;; 
+    *) echo "error: usage bench [ -r <ram-size> ] [ -il \"<IL level> <IL level> ...\"] [ -ddl ] [-para \"<threadnum> <threadnum> ...\"]"
+       exit
+    ;;
+  esac
+  shift
+done
+
+
+# set max wht size
+if test $ram -ge   16; then whtsize=21; fi
+if test $ram -gt   32; then whtsize=22; fi
+if test $ram -gt   64; then whtsize=23; fi
+if test $ram -gt  128; then whtsize=24; fi
+if test $ram -gt  256; then whtsize=25; fi
+if test $ram -gt  512; then whtsize=26; fi
+if test $ram -gt 1024; then whtsize=27; fi
+if test $ram -gt 2048; then whtsize=28; fi
+if test $ram -gt 4096; then whtsize=29; fi
+if test $ram -gt 8192; then whtsize=30; fi                                        
+if test $ram -le    8; then whtsize=19; fi
+if test $ram -le    4; then whtsize=18; fi                                        
+
+# get path
+p=`pwd`
+
+# run all interleaving levels
+for i in $il; do
+  ./configure --prefix=$p/bench --enable-RAM=$ram --enable-IL=$i
+  make install
+  rm $p/bench/var/wht_trees
+  ./wht_dp.prl -v
+  mv $p/bench/var/wht_trees $p/bench/${whtsize}-il$i
+  make distclean
+done
+
+# same thing with ddl
+if [ $ddl -eq 1 ]; then
+  for i in $il; do
+    ./configure --prefix=$p/bench --enable-RAM=$ram --enable-IL=$i --enable-DDL
+    make install
+    rm $p/bench/var/wht_trees
+    ./wht_dp.prl -v
+    mv $p/bench/var/wht_trees $p/bench/${whtsize}-ddl-il$i
+    make distclean
+  done
+fi
+
+# same thing with para
+if test "$para" != "" ; then
+  opt="--prefix=$p/bench --enable-RAM=$ram --enable-PARA"
+  file="$p/bench/${whtsize}"
+
+  if [ $ddl -eq 1 ]; then
+    opt="$opt --enable-DDL"
+    file="$file-ddl"
+  fi
+
+  for j in $il; do
+    ./configure $opt --enable-IL=$j
+    make install
+    rm $p/bench/var/*
+    for i in $para; do
+      ./wht_dp.prl -v -p$i
+      mv $p/bench/var/wht_trees$i $file-il$j-para$i
+    done
+    make distclean
+  done
+fi
+

@@ -1,0 +1,19 @@
+Documentation of the directory codegen
+======================================
+MP, from 05.10.99
+
+This directory contains the code generators for the
+wht package. The C functions produce unrolled code
+for small whts according to different strategies.
+The desired code generator is selected in the Makefile
+one directory above.
+
+File                Notes
+
+README              This file.
+whtgeni.c           Iterative unrolling, only 2 temporaries
+whtgenit.c          Iterative unrolling, each temporaray is only 
+                    used once.
+whtgenr.c           Recursive unrolling, only 2 temporaries
+whtgenrt.c          Recursive unrolling, each temporaray is only 
+                    used once.

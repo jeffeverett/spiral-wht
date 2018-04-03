@@ -1,0 +1,23 @@
+1 ! small[1] ! 8.463860e-08
+2 ! small[2] ! 1.335144e-07
+3 ! small[3] ! 3.767014e-07
+4 ! small[4] ! 1.401901e-06
+5 ! small[5] ! 3.814697e-06
+6 ! split[ small[3], small[3] ] ! 8.087158e-06
+7 ! split[ small[3], small[4] ] ! 1.922607e-05
+8 ! split[ small[2], small[3], small[3] ] ! 4.180908e-05
+9 ! split[ small[3], small[3], small[3] ] ! 8.422852e-05
+10 ! split[ small[3], small[3], small[4] ] ! 2.026367e-04
+11 ! split[ small[2], split[ small[3], small[3], small[3] ] ] ! 4.589844e-04
+12 ! split[ small[2], split[ small[3], small[3], small[4] ] ] ! 1.103516e-03
+13 ! split[ small[2], small[2], split[ small[3], small[3], small[3] ] ] ! 2.480469e-03
+14 ! split[ small[2], small[2], split[ small[3], small[3], small[4] ] ] ! 5.546875e-03
+15 ! split[ small[2], small[2], split[ small[2], split[ small[3], small[3], small[3] ] ] ] ! 1.210938e-02
+16 ! split[ small[2], split[ small[2], small[2], split[ small[3], small[3], small[4] ] ] ] ! 2.906250e-02
+17 ! split[ small[2], split[ small[2], small[2], split[ small[2], split[ small[3], small[3], small[3] ] ] ] ] ! 6.750000e-02
+18 ! split[ small[2], split[ small[2], split[ small[2], small[2], split[ small[3], small[3], small[4] ] ] ] ] ! 1.475000e-01
+19 ! split[ small[2], small[2], split[ small[2], small[2], split[ small[2], split[ small[3], small[3], small[3] ] ] ] ] ! 3.350000e-01
+20 ! split[ small[2], small[2], split[ small[2], split[ small[2], small[2], split[ small[3], small[3], small[4] ] ] ] ] ! 7.050000e-01
+21 ! split[ small[2], split[ small[2], small[2], split[ small[2], small[2], split[ small[2], split[ small[3], small[3], small[3] ] ] ] ] ] ! 1.510000e+00
+22 ! split[ small[2], small[2], split[ small[2], split[ small[2], split[ small[2], small[2], split[ small[3], small[3], small[4] ] ] ] ] ] ! 3.140000e+00
+23 ! split[ small[2], split[ small[2], split[ small[2], small[2], split[ small[2], small[2], split[ small[2], split[ small[3], small[3], small[3] ] ] ] ] ] ] ! 7.010000e+00
